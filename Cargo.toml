@@ -3,6 +3,11 @@ name = "runnt"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "Easy Neural Network for machine learning"
+repository =  "https://github.com/griccardos/runnt/"
+readme = "README.md"
+keywords = ["reinforcement", "ai","qlearning","machinelearning","learning"]
+categories = ["science","algorithms"]
 
 [dependencies]
 fastrand="1.9.0" #for random

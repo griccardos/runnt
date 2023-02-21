@@ -3,52 +3,53 @@ use runnt::activation::ActivationType;
 pub fn main() {
     fastrand::seed(1);
 
-    //generate random function which we want to predict
-    let sinefn = |x: f32| x * x * (5. * 3.14159 * x).sin().powi(6);
+    //Create Neural Network
+    let mut nn = runnt::nn::NN::new(&[1, 8, 8, 1])
+        .with_hidden_type(ActivationType::Sigmoid) //Non linear Activation function
+        .with_output_type(ActivationType::Sigmoid) //Expected output function
+        .with_learning_rate(0.5); //Learning rate
 
-    let mut inp_out = (0..1000)
-        .map(|_| {
-            let x = fastrand::f32();
+    //generate function which we want to predict
+    let sinefn = |x: f32| x * x * (5. * 1.14 * x).sin().powi(2);
+
+    //get some observations
+    let inp_out = (0..1000)
+        .map(|i| {
+            let x = i as f32 / 1000.;
             let y = sinefn(x);
             (vec![x], vec![y])
         })
         .collect::<Vec<(Vec<f32>, Vec<f32>)>>();
-    let mut nn = runnt::nn::NN::new(&[1, 16, 16, 1])
-        .with_hidden_type(ActivationType::Sigmoid)
-        .with_output_type(ActivationType::Sigmoid)
-        .with_learning_rate(0.2);
 
     let mut mse_sum = 0.;
     let mut avg_mse;
-    for e in 1..20_000 {
-        fastrand::shuffle(&mut inp_out);
-        let ins = inp_out
-            .iter()
-            .map(|x| x.0.as_slice())
-            .collect::<Vec<&[f32]>>();
-        let outs = inp_out
-            .iter()
-            .map(|x| x.1.as_slice())
-            .collect::<Vec<&[f32]>>();
+    for step in 1..1_000_000 {
+        let rand_index = fastrand::usize(0..inp_out.len());
 
-        nn.fit_batch_size(&ins, &outs, 1);
+        //Stochastic gradient descent
+        nn.fit_one(&inp_out[rand_index].0, &inp_out[rand_index].1);
 
         mse_sum += nn.error();
-        avg_mse = mse_sum / e as f32;
+        avg_mse = mse_sum / step as f32;
 
-        if e % 1000 == 0 {
-            println!("epoch {e}: mse={avg_mse}");
+        if step % 100000 == 0 {
+            println!("step {step}: mse={avg_mse}");
         }
     }
 
-    (0..10).for_each(|_| {
-        let x = fastrand::f32();
-        let y = sinefn(x);
-        let pred = nn.forward(&[x]);
-        println!(
-            "x={x:.3} actual={y:.3} pred={:.3} diff= {:.3}",
-            pred[0],
-            y - pred[0]
-        );
-    })
+    inp_out
+        .iter()
+        .enumerate()
+        .filter(|i| i.0 % (inp_out.len() / 10) == 0)
+        .map(|x| x.1)
+        .for_each(|(x, y)| {
+            let pred = nn.forward(&x);
+            let x = x[0];
+            let y = y[0];
+            println!(
+                "x={x:.3} actual={y:.3} pred={:.3} diff= {:.3}",
+                pred[0],
+                y - pred[0]
+            );
+        })
 }
