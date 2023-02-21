@@ -1,4 +1,4 @@
-# runnt (**ru**st **n**eural **n**e**t**)
+# runnt (*ru*st *n*eural *n*e*t*)
 Very simple fully connected neural network.
 
 For when you just want to throw something together with minimal dependencies, and a few lines of code.
@@ -23,10 +23,10 @@ You are welcome to raise an issue or PR if you identify any errors or optimisati
     let inputs = [[0., 0.], [0., 1.], [1., 0.], [1., 1.]];
     let outputs = [[0.], [1.], [1.], [0.]];
 
-        let mut nn = NN::new(&[2, 8, 1])
-        .with_learning_rate(0.2)
-        .with_hidden_type(ActivationType::Tanh)
-        .with_output_type(ActivationType::Linear);
+    let mut nn = NN::new(&[2, 8, 1])
+                     .with_learning_rate(0.2)
+                     .with_hidden_type(ActivationType::Tanh)
+                     .with_output_type(ActivationType::Linear);
 
 
     for i in 0..5000 {
