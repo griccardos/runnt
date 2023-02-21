@@ -1,0 +1,5 @@
+/target
+.vscode
+working
+src/testbin
+mnist.rs
