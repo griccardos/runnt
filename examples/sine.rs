@@ -28,8 +28,9 @@ pub fn main() {
 
         //Stochastic gradient descent
         nn.fit_one(&inp_out[rand_index].0, &inp_out[rand_index].1);
+        let err = nn.forward_error(&inp_out[rand_index].0, &inp_out[rand_index].1);
 
-        mse_sum += nn.error();
+        mse_sum += err;
         avg_mse = mse_sum / step as f32;
 
         if step % 100000 == 0 {

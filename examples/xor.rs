@@ -26,10 +26,13 @@ pub fn main() {
         let outs = inp_out.iter().map(|x| &x.1[..]).collect::<Vec<&[f32]>>();
 
         nn.fit(&ins, &outs); //we do batch descent, passing in all observations each time
+        let err: f32 = ins
+            .iter()
+            .zip(outs)
+            .map(|(ins, outs)| nn.forward_error(&ins, &outs))
+            .sum();
 
-        //nn.fit_batch_size(&ins, &outs, 2); //can also do mini batch, e.g. 2 at a time...
-
-        mse_sum += nn.error();
+        mse_sum += err;
         avg_mse = mse_sum / e as f32;
     }
 

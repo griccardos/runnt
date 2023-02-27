@@ -7,20 +7,16 @@ use ndarray::Array;
 
 use crate::activation::{activate, activate_der, ActivationType};
 use crate::initialization::{calc_initialization, InitializationType};
+use crate::regularization::Regularization;
 
 pub struct NN {
     weights: Vec<Array2<f32>>, // layer * 2D matrix e.g. [2x2], [2x1]
     bias: Vec<Array2<f32>>,    //layer * 2D matrix
     shape: Vec<usize>,
     learning_rate: f32,
-    error: f32, //currently MSE, may change
     hidden_type: ActivationType,
     output_type: ActivationType,
-}
-
-struct ErrorAndGradient {
-    error: f32,
-    gradient: Vec<f32>,
+    regularization: Regularization,
 }
 
 impl NN {
@@ -70,9 +66,9 @@ impl NN {
             weights,
             bias,
             learning_rate: 0.01,
-            error: 0.,
             hidden_type: ActivationType::Sigmoid,
             output_type: ActivationType::Linear,
+            regularization: Regularization::None,
         };
         s.with_initialization(InitializationType::Random)
     }
@@ -95,6 +91,11 @@ impl NN {
         self
     }
 
+    pub fn with_regularization(mut self, reg: Regularization) -> Self {
+        self.regularization = reg;
+        self
+    }
+
     pub fn reset_weights(&mut self, typ: InitializationType) {
         let layers = self.shape.len();
         for l in 0..layers - 1 {
@@ -112,6 +113,8 @@ impl NN {
     /// Perform mini batch gradient descent on `batch_size`.
     /// If batch is smaller than data, will perform fit multiple times
     pub fn fit_batch_size(&mut self, inputs: &[&[f32]], targets: &[&[f32]], batch_size: usize) {
+        //perform fit on chunks of batch size
+        //collect errors
         inputs
             .chunks(batch_size)
             .zip(targets.chunks(batch_size))
@@ -119,6 +122,7 @@ impl NN {
     }
 
     /// Gradient descent on entire batch.
+    /// Returns Average error of batch
     pub fn fit(&mut self, inputs: &[&[f32]], targets: &[&[f32]]) {
         //forward inputs and calculate error gradients
         //we add up the weights of all gradients, then we divide by count to get average
@@ -126,34 +130,33 @@ impl NN {
         let mut weight_gradient_sum: Vec<Array2<f32>> = vec![];
         let mut bias_gradient_sum: Vec<Array2<f32>> = vec![];
 
-        let mut errors = 0.;
         for (input, target) in inputs.iter().zip(targets) {
             let values = self.internal_forward(input);
             let outputs = values.last().unwrap().row(0).as_slice().unwrap().to_vec();
-            let err_and_grad = Self::output_error_and_gradient(&outputs, target);
-            errors += err_and_grad.error;
+            let grad = self.calc_gradient(&outputs, target);
 
-            let (weight_gradient, bias_gradient) = self.backward(values, err_and_grad.gradient);
+            let (weight_gradient, bias_gradient) = self.backward(values, grad);
 
             if weight_gradient_sum.is_empty() {
                 weight_gradient_sum = weight_gradient;
             } else {
-                for (s, w) in weight_gradient_sum.iter_mut().zip(&weight_gradient) {
-                    *s += w;
+                for (layer_weight_sum, layer_weight) in
+                    weight_gradient_sum.iter_mut().zip(&weight_gradient)
+                {
+                    *layer_weight_sum += layer_weight;
                 }
             }
             if bias_gradient_sum.is_empty() {
                 bias_gradient_sum = bias_gradient;
             } else {
-                for (s, w) in bias_gradient_sum.iter_mut().zip(&bias_gradient) {
-                    *s += w;
+                for (layer_bias_sum, layer_bias) in bias_gradient_sum.iter_mut().zip(&bias_gradient)
+                {
+                    *layer_bias_sum += layer_bias;
                 }
             }
         }
 
         let count = inputs.len() as f32;
-        //calc MSE
-        self.error = errors / count;
 
         //now get average of error gradient
         for layer in &mut weight_gradient_sum {
@@ -163,6 +166,9 @@ impl NN {
             layer.mapv_inplace(|a| a / count);
         }
 
+        //we calc regularisation based on
+        self.regularize(&mut weight_gradient_sum);
+
         //propagate error gradients backwards
         self.apply_gradients(&weight_gradient_sum, &bias_gradient_sum);
     }
@@ -171,6 +177,46 @@ impl NN {
     pub fn forward(&self, input: &[f32]) -> Vec<f32> {
         let values = self.internal_forward(input);
         values.last().unwrap().row(0).as_slice().unwrap().to_vec()
+    }
+
+    /// Forward inputs to get error
+    ///
+    pub fn forward_error(&self, input: &[f32], target: &[f32]) -> f32 {
+        self.calc_error(&self.forward(input), target)
+    }
+    ///calcs error based on outputs and target
+    pub fn calc_error(&self, outputs: &[f32], target: &[f32]) -> f32 {
+        //E = error / loss
+        //a = value after activation
+        //t = target value
+
+        // E = 0.5* (t-a)^2
+        // error gradient: dE/da = -1*2*0.5*(t-a) = -(t-a)=a-t
+
+        let mut errors = vec![];
+        for (act, tar) in outputs.iter().zip(target) {
+            errors.push(0.5 * (act - tar).powi(2));
+        }
+        errors.iter().sum::<f32>()
+    }
+
+    ///We calc current error, and the error gradient for output layer
+    fn calc_gradient(&self, outputs: &[f32], target: &[f32]) -> Vec<f32> {
+        //E = error / loss
+        //a = value after activation
+        //t = target value
+
+        // E = 0.5* (t-a)^2
+        // error gradient: dE/da = -1*2*0.5*(t-a) = -(t-a)=a-t
+
+        //get error gradient
+        let mut gradient = vec![];
+        for (act, tar) in outputs.iter().zip(target) {
+            let deda = act - tar; //dE/da = act - target;
+            gradient.push(deda);
+        }
+
+        gradient
     }
 
     /// convert to array, and forward, returning values for each layer
@@ -209,34 +255,6 @@ impl NN {
         }
 
         values
-    }
-
-    ///We calc current error, and the error gradient for output layer
-    fn output_error_and_gradient(outputs: &[f32], target: &[f32]) -> ErrorAndGradient {
-        //E = error / loss
-        //a = value after activation
-        //t = target value
-
-        // E = 0.5* (t-a)^2
-        // error gradient: dE/da = -1*2*0.5*(t-a) = -(t-a)=a-t
-
-        //we save the MSE which is the sum of the errors / N
-        let mut errors = vec![];
-        for (act, tar) in outputs.iter().zip(target) {
-            errors.push(0.5 * (act - tar).powi(2));
-        }
-
-        //get error gradient
-        let mut gradient = vec![];
-        for (act, tar) in outputs.iter().zip(target) {
-            let deda = act - tar; //dE/da = act - target; NOTE: this is the same for cross entropy with softmax
-            gradient.push(deda);
-        }
-
-        ErrorAndGradient {
-            error: errors.iter().sum::<f32>(), //sse
-            gradient,
-        }
     }
 
     ///Calculates the gradients for all layers
@@ -313,6 +331,36 @@ impl NN {
         (weight_gradients, bias_gradients)
     }
 
+    ///Apply regularisation to gradients
+    fn regularize(&mut self, weight_gradients: &mut Vec<Array2<f32>>) {
+        match self.regularization {
+            Regularization::None => {}
+            Regularization::L1(lambda) => {
+                // L1 =  0.5*|w|*lambda
+                //thus dL1/dw = sign(w) * lambda
+                //we adjust current gradients effectively reducing value of weight
+                for (wlayer, gradlayer) in self.weights.iter().zip(weight_gradients.iter_mut()) {
+                    *gradlayer += &(wlayer.mapv(|v| v.signum()) * lambda);
+                }
+            }
+            Regularization::L2(lambda) => {
+                // L2 =  0.5*w^2*lambda
+                //thus dL2/dw = w * lambda
+                //we adjust current gradients effectively reducing value of weight
+                for (wlayer, gradlayer) in self.weights.iter().zip(weight_gradients.iter_mut()) {
+                    *gradlayer += &(wlayer * lambda);
+                }
+            }
+            Regularization::L1L2(l1lambda, l2lambda) => {
+                for (wlayer, gradlayer) in self.weights.iter().zip(weight_gradients.iter_mut()) {
+                    let l1: Array2<f32> = wlayer.mapv(|v| v.signum()) * l1lambda;
+                    let l2: Array2<f32> = wlayer * l2lambda;
+                    *gradlayer += &(l1 + l2);
+                }
+            }
+        }
+    }
+
     ///Apply gradients to network
     fn apply_gradients(
         &mut self,
@@ -324,10 +372,6 @@ impl NN {
             self.bias[l] = &self.bias[l] - &bias_gradients[l] * self.learning_rate;
             self.weights[l] = &self.weights[l] - &weight_gradients[l] * self.learning_rate;
         }
-    }
-
-    pub fn error(&self) -> f32 {
-        self.error
     }
 
     ///Save to path
@@ -545,8 +589,9 @@ mod tests {
             //check error
             assert_eq!(nn.bias, known_biases[i]);
             println!("{i}: biases ok");
+            let error = nn.calc_error(&nn.forward(&inputs[i]), &outputs[i]);
             nn.fit_one(&inputs[i], &outputs[i]);
-            assert_eq!(nn.error, known_errors[i]);
+            assert_eq!(error, known_errors[i]);
             println!("{i}: errors ok");
         }
     }
@@ -566,7 +611,7 @@ mod tests {
             ([1., 1.], [0.]),
         ];
 
-        let mut completed_steps_matrix = vec![];
+        let mut completed_steps = vec![];
 
         //run a few times, and get average completion epoch
         for _ in 0..5 {
@@ -577,24 +622,24 @@ mod tests {
             for steps in 0..20_000 {
                 fastrand::shuffle(&mut inp_out);
                 nn.fit_one(&inp_out[0].0, &inp_out[0].1);
+                let err = nn.forward_error(&inp_out[0].0, &inp_out[0].1);
 
-                results.push_back(nn.error());
+                results.push_back(err);
                 if results.len() > 100 {
                     results.pop_front();
                     if results.iter().sum::<f32>() / 100. < 0.02 {
-                        completed_steps_matrix.push(steps);
+                        completed_steps.push(steps);
                         break;
                     }
                 }
             }
         }
 
-        let avg_matrix =
-            completed_steps_matrix.iter().sum::<usize>() / completed_steps_matrix.len();
+        let avg = completed_steps.iter().sum::<usize>() / completed_steps.len();
 
-        println!("len:{} avg:{avg_matrix}", completed_steps_matrix.len());
-        assert!(completed_steps_matrix.len() == 5);
-        assert!(avg_matrix == 5535);
+        println!("len:{} avg:{avg}", completed_steps.len());
+        assert!(completed_steps.len() == 5);
+        assert!(avg == 7097);
     }
 
     #[test]
@@ -614,7 +659,7 @@ mod tests {
             ([1., 1.], [0.]),
         ];
 
-        let mut completed_steps_matrix = vec![];
+        let mut completed_steps = vec![];
 
         //run a few times, and get average completion epoch
         for _ in 0..5 {
@@ -628,24 +673,29 @@ mod tests {
                 let outs = vec![&inp_out[0].1[..], &inp_out[1].1[..]];
 
                 nn.fit(&ins, &outs);
-                results.push_back(nn.error());
+                let err: f32 = ins
+                    .iter()
+                    .zip(&outs)
+                    .map(|(ins, outs)| nn.forward_error(&ins, &outs))
+                    .sum();
+
+                results.push_back(err / ins.len() as f32);
                 if results.len() > 100 {
                     results.pop_front();
                     if results.iter().sum::<f32>() / 100. < 0.02 {
-                        completed_steps_matrix.push(steps);
+                        completed_steps.push(steps);
                         break;
                     }
                 }
             }
         }
 
-        let avg_matrix =
-            completed_steps_matrix.iter().sum::<usize>() / completed_steps_matrix.len();
+        let avg = completed_steps.iter().sum::<usize>() / completed_steps.len();
 
-        println!("len:{} avg:{avg_matrix}", completed_steps_matrix.len());
+        println!("len:{} avg:{avg}", completed_steps.len());
 
-        assert!(completed_steps_matrix.len() == 5);
-        assert!(avg_matrix == 1674);
+        assert!(completed_steps.len() == 5);
+        assert!(avg == 1587);
     }
 
     #[test]
