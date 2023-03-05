@@ -9,6 +9,27 @@ use crate::activation::{activate, activate_der, ActivationType};
 use crate::initialization::{calc_initialization, InitializationType};
 use crate::regularization::Regularization;
 
+/// Struct holding Neural Net functionality
+///```rust
+///   //XOR
+///    use runnt::{nn::NN,activation::ActivationType};
+///    let inputs = [[0., 0.], [0., 1.], [1., 0.], [1., 1.]];
+///    let outputs = [[0.], [1.], [1.], [0.]];
+///
+///        let mut nn = NN::new(&[2, 8, 1])
+///        .with_learning_rate(0.2)
+///        .with_hidden_type(ActivationType::Tanh)
+///        .with_output_type(ActivationType::Linear);
+///
+///
+///    for i in 0..5000 {
+///        nn.fit_one(&inputs[i % 4], &outputs[i % 4]);
+///    }
+///    assert_eq!(nn.forward(&[0., 0.]).first().unwrap().round(), 0.);
+///    assert_eq!(nn.forward(&[0., 1.]).first().unwrap().round(), 1.);
+///    assert_eq!(nn.forward(&[1., 0.]).first().unwrap().round(), 1.);
+///    assert_eq!(nn.forward(&[1., 1.]).first().unwrap().round(), 0.);
+///```
 pub struct NN {
     weights: Vec<Array2<f32>>, // layer * 2D matrix e.g. [2x2], [2x1]
     bias: Vec<Array2<f32>>,    //layer * 2D matrix
@@ -20,27 +41,18 @@ pub struct NN {
 }
 
 impl NN {
-    ///```rust
-    ///   //XOR
-    ///    use runnt::{nn::NN,activation::ActivationType};
-    ///    let inputs = [[0., 0.], [0., 1.], [1., 0.], [1., 1.]];
-    ///    let outputs = [[0.], [1.], [1.], [0.]];
+    /// Initialize a neural net with the shape , including input and output layer sizes.
+    /// For network with sizes: input 7, hidden layer 1 of 10, hidden layer 2 of 20, output of 2
+    /// we use: `&[7,10,20,2]`.
     ///
-    ///        let mut nn = NN::new(&[2, 8, 1])
-    ///        .with_learning_rate(0.2)
-    ///        .with_hidden_type(ActivationType::Tanh)
-    ///        .with_output_type(ActivationType::Linear);
+    /// Uses the defaults: <br/>
+    ///  learning rate = 0.01<br/>
+    ///  hidden layer type: Sigmoid  <br/>
+    ///  output layer type: Linear  <br/>
+    ///  weight initialization: Random  <br/>
     ///
-    ///
-    ///    for i in 0..5000 {
-    ///        nn.fit_one(&inputs[i % 4], &outputs[i % 4]);
-    ///    }
-    ///    assert_eq!(nn.forward(&[0., 0.]).first().unwrap().round(), 0.);
-    ///    assert_eq!(nn.forward(&[0., 1.]).first().unwrap().round(), 1.);
-    ///    assert_eq!(nn.forward(&[1., 0.]).first().unwrap().round(), 1.);
-    ///    assert_eq!(nn.forward(&[1., 1.]).first().unwrap().round(), 0.);
-    ///```
-    pub fn new(network_shape: &[usize]) -> Self {
+
+    pub fn new(network_shape: &[usize]) -> NN {
         let mut weights = vec![];
         let mut bias = vec![];
         let mut values = vec![];
@@ -107,12 +119,17 @@ impl NN {
 
     ///Also known as Stochastic Gradient Descent i.e. Gradient descent with batch size = 1
     pub fn fit_one(&mut self, input: &[f32], targets: &[f32]) {
-        self.fit(&[input], &[targets]);
+        self.fit(&[&input.to_vec()], &[&targets.to_vec()]);
     }
 
     /// Perform mini batch gradient descent on `batch_size`.
     /// If batch is smaller than data, will perform fit multiple times
-    pub fn fit_batch_size(&mut self, inputs: &[&[f32]], targets: &[&[f32]], batch_size: usize) {
+    pub fn fit_batch_size(
+        &mut self,
+        inputs: &[&Vec<f32>],
+        targets: &[&Vec<f32>],
+        batch_size: usize,
+    ) {
         //perform fit on chunks of batch size
         //collect errors
         inputs
@@ -123,7 +140,7 @@ impl NN {
 
     /// Gradient descent on entire batch.
     /// Returns Average error of batch
-    pub fn fit(&mut self, inputs: &[&[f32]], targets: &[&[f32]]) {
+    pub fn fit(&mut self, inputs: &[&Vec<f32>], targets: &[&Vec<f32>]) {
         //forward inputs and calculate error gradients
         //we add up the weights of all gradients, then we divide by count to get average
         //we then apply the gradients backwards to update the weights
@@ -184,18 +201,27 @@ impl NN {
     pub fn forward_error(&self, input: &[f32], target: &[f32]) -> f32 {
         self.calc_error(&self.forward(input), target)
     }
+
+    /// Forward batch, and get mean error
+    pub fn forward_errors(&self, inputs: &[&Vec<f32>], targets: &[&Vec<f32>]) -> f32 {
+        let mut sum = 0.;
+        for (inp, tar) in inputs.iter().zip(targets) {
+            sum += self.forward_error(inp, tar);
+        }
+        sum / inputs.len() as f32
+    }
+
     ///calcs error based on outputs and target
     pub fn calc_error(&self, outputs: &[f32], target: &[f32]) -> f32 {
         //E = error / loss
-        //a = value after activation
+        //a = forwarded value after activation
         //t = target value
-
-        // E = 0.5* (t-a)^2
-        // error gradient: dE/da = -1*2*0.5*(t-a) = -(t-a)=a-t
 
         let mut errors = vec![];
         for (act, tar) in outputs.iter().zip(target) {
-            errors.push(0.5 * (act - tar).powi(2));
+            // E = 0.5* (t-a)^2
+            // error gradient: dE/da = -1*2*0.5*(t-a) = -(t-a)=a-t
+            errors.push(0.5 * (act - tar).powi(2))
         }
         errors.iter().sum::<f32>()
     }
@@ -332,7 +358,7 @@ impl NN {
     }
 
     ///Apply regularisation to gradients
-    fn regularize(&mut self, weight_gradients: &mut Vec<Array2<f32>>) {
+    fn regularize(&mut self, weight_gradients: &mut [Array2<f32>]) {
         match self.regularization {
             Regularization::None => {}
             Regularization::L1(lambda) => {
@@ -541,6 +567,34 @@ impl Display for NN {
     }
 }
 
+//TOOLS which help
+
+/// This checks the index of the maximum value in each vec are equal
+/// Used to compare one hot encoding predicted with actual
+/// Typically the actual will be 1 for a value and zero for else,
+/// whereas the predicted may not be exactly one
+/// So instead we compare the index of the maximum value, to determine equality
+pub fn max_index_equal(target: &[f32], predicted: &[f32]) -> bool {
+    assert_eq!(
+        target.len(),
+        predicted.len(),
+        "Target and predicted should have same length"
+    );
+    let pred = max_index(predicted);
+    let tar = max_index(target);
+
+    pred == tar
+}
+
+/// Returns the index of the maximum value, panics if empty
+pub fn max_index(vec: &[f32]) -> usize {
+    vec.iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .expect("max_index expects a vec with non zero size")
+        .0
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -653,10 +707,10 @@ mod tests {
             .with_output_type(ActivationType::Sigmoid);
 
         let mut inp_out = [
-            ([0f32, 0.], [0.1]),
-            ([0., 1.], [1.]),
-            ([1., 0.], [1.]),
-            ([1., 1.], [0.]),
+            (vec![0f32, 0.], vec![0.1]),
+            (vec![0., 1.], vec![1.]),
+            (vec![1., 0.], vec![1.]),
+            (vec![1., 1.], vec![0.]),
         ];
 
         let mut completed_steps = vec![];
@@ -669,15 +723,12 @@ mod tests {
             nn.reset_weights(InitializationType::Random);
             for steps in 0..20_000 {
                 fastrand::shuffle(&mut inp_out);
-                let ins = vec![&inp_out[0].0[..], &inp_out[1].0[..]];
-                let outs = vec![&inp_out[0].1[..], &inp_out[1].1[..]];
+                let ins = vec![&inp_out[0].0, &inp_out[1].0];
+                let outs = vec![&inp_out[0].1, &inp_out[1].1];
 
                 nn.fit(&ins, &outs);
-                let err: f32 = ins
-                    .iter()
-                    .zip(&outs)
-                    .map(|(ins, outs)| nn.forward_error(&ins, &outs))
-                    .sum();
+
+                let err: f32 = nn.forward_errors(&ins, &outs);
 
                 results.push_back(err / ins.len() as f32);
                 if results.len() > 100 {
@@ -695,9 +746,27 @@ mod tests {
         println!("len:{} avg:{avg}", completed_steps.len());
 
         assert!(completed_steps.len() == 5);
-        assert!(avg == 1587);
+        assert!(avg == 1185);
     }
+    #[test]
+    ///use this in documentation
+    fn xor_documentation() {
+        let inputs = [[0., 0.], [0., 1.], [1., 0.], [1., 1.]];
+        let outputs = [[0.], [1.], [1.], [0.]];
 
+        let mut nn = NN::new(&[2, 8, 1])
+            .with_learning_rate(0.2)
+            .with_hidden_type(ActivationType::Tanh)
+            .with_output_type(ActivationType::Linear);
+
+        for i in 0..5000 {
+            nn.fit_one(&inputs[i % 4], &outputs[i % 4]);
+        }
+        assert_eq!(nn.forward(&[0., 0.]).first().unwrap().round(), 0.);
+        assert_eq!(nn.forward(&[0., 1.]).first().unwrap().round(), 1.);
+        assert_eq!(nn.forward(&[1., 0.]).first().unwrap().round(), 1.);
+        assert_eq!(nn.forward(&[1., 1.]).first().unwrap().round(), 0.);
+    }
     #[test]
     fn test_save_load() {
         let nn = NN::new(&[10, 10, 10])

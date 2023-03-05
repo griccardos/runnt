@@ -15,7 +15,11 @@ You are welcome to raise an issue or PR if you identify any errors or optimisati
 - [X] able to define activation types
 - [X] can save/load model
 - [X] Stochastic, mini batch, gradient descent
-
+- [X] Dataset manager 
+    - [X] csv
+    - [X] onehot encoding
+    - [X] normalization 
+    
 ## How to use
 ```rust
    //XOR

@@ -4,7 +4,10 @@ use std::{
     time::Instant,
 };
 
-use runnt::{activation::ActivationType, nn::NN};
+use runnt::{
+    activation::ActivationType,
+    nn::{max_index_equal, NN},
+};
 
 pub fn main() {
     fastrand::seed(1);
@@ -35,8 +38,8 @@ cargo run --release --example mnist -- /tmp/mnist
     for epoch in 1..20 {
         fastrand::shuffle(&mut training);
 
-        let inputs = training.iter().map(|x| x.0.as_slice()).collect::<Vec<_>>();
-        let targets = training.iter().map(|x| x.1.as_slice()).collect::<Vec<_>>();
+        let inputs = training.iter().map(|x| &x.0).collect::<Vec<_>>();
+        let targets = training.iter().map(|x| &x.1).collect::<Vec<_>>();
         nn.fit_batch_size(&inputs, &targets, 10);
         let (test_acc, test_mse) = get_acc_mse(&nn, &test);
         let (train_acc, train_mse) = get_acc_mse(&nn, &training);
@@ -56,21 +59,8 @@ fn get_acc_mse(nn: &NN, data: &Vec<(Vec<f32>, Vec<f32>)>) -> (f32, f32) {
     let mut sse = 0.;
     for i in 0..data.len() {
         let pred = nn.forward(data[i].0.as_slice());
-        let pred_max = pred
-            .iter()
-            .fold(0., |acc, val| if *val > acc { *val } else { acc });
-        let pred_pos = pred.iter().position(|&x| x == pred_max).unwrap_or_default();
 
-        let tar_max = data[i]
-            .1
-            .iter()
-            .fold(0., |acc, val| if *val > acc { *val } else { acc });
-        let tar_pos = data[i]
-            .1
-            .iter()
-            .position(|&x| x == tar_max)
-            .unwrap_or_default();
-        if tar_pos == pred_pos {
+        if max_index_equal(&pred, &data[i].1) {
             sum += 1
         }
         sse += nn.calc_error(&pred, &data[i].1);
@@ -171,7 +161,6 @@ fn load_image_label(
         .as_slice()
         .chunks(28 * 28)
         .map(|a| a.iter().map(|&b| ((b as usize) as f32) / 255.0).collect())
-        //.skip(16) //magic, count, count r, count c
         .collect();
 
     println!(
