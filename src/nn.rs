@@ -620,6 +620,7 @@ pub fn max_index(vec: &[f32]) -> usize {
 /// 1. getting shuffled data and test data from Dataset
 /// 2. fitting data with batch size
 /// 3. reporting train and test mse
+/// 4. (optionally) report accuracy (assumes target and output is one hot encoded, and chooses highest value)
 /// Currently a convenience function. May be removed in the future.
 pub fn run_and_report(
     set: &Dataset,
@@ -627,20 +628,50 @@ pub fn run_and_report(
     epochs: usize,
     batch_size: usize,
     report_epoch: Option<usize>,
+    report_accuracy: bool,
 ) {
     let start = Instant::now();
-    println!("epoch train_mse test_mse duration(s)");
+    let acc = if report_accuracy {
+        " train_acc test_acc"
+    } else {
+        ""
+    };
+    println!("epoch train_mse test_mse{acc} duration(s)");
     for e in 1..=epochs {
         let (inp, tar) = set.get_data();
         net.fit_batch_size(&inp, &tar, batch_size);
         if let Some(re) = report_epoch {
             if re > 0 && e % re == 0 {
+                //get mse
                 let train_err = net.forward_errors(&inp, &tar);
-
                 let (inp_test, tar_test) = set.get_test_data();
                 let test_err = net.forward_errors(&inp_test, &tar_test);
+
+                //get accuracy
+                let mut acc = "".to_string();
+                if report_accuracy {
+                    let mut train_count = 0;
+                    for (inp, tar) in inp.iter().zip(tar) {
+                        let pred = net.forward(&inp);
+                        if max_index_equal(tar, &pred) {
+                            train_count += 1;
+                        }
+                    }
+
+                    let mut test_count = 0;
+                    for (inp, tar) in inp_test.iter().zip(tar_test) {
+                        let pred = net.forward(&inp);
+                        if max_index_equal(tar, &pred) {
+                            test_count += 1;
+                        }
+                    }
+                    let train_acc = train_count as f32 / inp.len() as f32 * 100.;
+                    let test_acc = test_count as f32 / inp_test.len() as f32 * 100.;
+                    acc = format!(" {train_acc:.1}% {test_acc:.1}%");
+                }
+
                 println!(
-                    "{e} {train_err} {test_err} {:.1}",
+                    "{e} {train_err} {test_err}{acc} {:.1}",
                     start.elapsed().as_secs_f32()
                 );
             }

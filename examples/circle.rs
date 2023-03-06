@@ -39,21 +39,5 @@ pub fn main() {
     let mut net = NN::new(&[set.input_size(), 4, set.target_size()]).with_learning_rate(0.03);
 
     //run reporting the mse
-    nn::run_and_report(&set, &mut net, 150, 1, Some(10));
-
-    let mut count = 0;
-
-    for (inp, out) in set.get_data_zip() {
-        let out = nn::max_index(out);
-        let pred = nn::max_index(&net.forward(inp));
-        if pred == out {
-            count += 1;
-        }
-        //use to plot if you wish
-        //println!("{},{},{},{}", inp[0], inp[1], out, pred);
-    }
-    println!(
-        "correct {}%",
-        count as f32 / set.get_data_zip().len() as f32 * 100.
-    );
+    nn::run_and_report(&set, &mut net, 150, 1, Some(10), true);
 }
