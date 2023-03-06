@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
+    ops::RangeInclusive,
     path::Path,
 };
 
@@ -62,14 +63,28 @@ impl Dataset {
         (item.0.as_ref(), item.1.as_ref())
     }
 
-    /// Returns shuffled data
+    /// Returns shuffled data into a Vec of inputs, and a Vec of targets
+    /// easier for forward and fit
     pub fn get_data(&self) -> (Vec<&Inputs>, Vec<&Targets>) {
         self.get_shuffled_data(&self.data)
+    }
+    // returns shuffled data into a zipped Vec of (Input,Output)
+    // easier for reporting
+    pub fn get_data_zip(&self) -> Vec<(&Inputs, &Targets)> {
+        let (inp, out) = self.get_data();
+        inp.into_iter().zip(out).collect()
     }
 
     /// Returns shuffled test data
     pub fn get_test_data(&self) -> (Vec<&Inputs>, Vec<&Targets>) {
         self.get_shuffled_data(&self.test_data)
+    }
+
+    // returns shuffled test data into a zipped Vec of (Input,Output)
+    // easier for reporting
+    pub fn get_test_data_zip(&self) -> Vec<(&Inputs, &Targets)> {
+        let (inp, out) = self.get_data();
+        inp.into_iter().zip(out).collect()
     }
 
     fn get_shuffled_data(&self, data: &Vec<(Inputs, Targets)>) -> (Vec<&Inputs>, Vec<&Targets>) {
@@ -102,6 +117,13 @@ impl Dataset {
     }
 }
 #[derive(Clone, Copy)]
+///Adjustments available to convert a string to an f32<br>
+/// `F32` - Converts string to f32 <br>
+/// `NormaliseMean` - Normalises based on field values (x-mean)/stddev <br/>
+/// `NormaliseMinMax(f32, f32)` - Nomalises between a given lower and upper bound <br/>
+/// `OneHot` - Creates new column for each one of the unique values with 1 for that and 0 for others <br/>
+/// `Function(fn(&str) -> f32)` - Applies function to convert to f32 <br/>
+
 pub enum Adjustment {
     ///Converts string to f32
     F32,
@@ -220,6 +242,8 @@ impl DatasetBuilder {
         self
     }
 
+    /// Add inputs from columns zero indexed
+    /// e.g. `.add_input_columns(&[0,4],Adjustment::F32)`
     pub fn add_input_columns(mut self, indexes: &[usize], adjustment: Adjustment) -> Self {
         for &index in indexes {
             self.columns.push(Column {
@@ -227,6 +251,18 @@ impl DatasetBuilder {
                 adjustment,
                 location: Location::Input,
             });
+        }
+        self
+    }
+    /// Add inputs from columns as zero indexed range
+    /// e.g. `.add_input_columns(0..=4,Adjustment::F32)`
+    pub fn add_input_columns_range(
+        mut self,
+        range: RangeInclusive<usize>,
+        adjustment: Adjustment,
+    ) -> Self {
+        for index in range {
+            self = self.add_input_columns(&[index], adjustment);
         }
         self
     }

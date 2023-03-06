@@ -21,6 +21,7 @@ You are welcome to raise an issue or PR if you identify any errors or optimisati
     - [X] normalization 
     
 ## How to use
+### Simple example
 ```rust
    //XOR
     use runnt::{nn::NN,activation::ActivationType};
@@ -41,4 +42,26 @@ You are welcome to raise an issue or PR if you identify any errors or optimisati
     assert_eq!(nn.forward(&[1., 0.]).first().unwrap().round(), 1.);
     assert_eq!(nn.forward(&[1., 1.]).first().unwrap().round(), 0.);
 ```
+### With Dataset:
+```rust
+ let set = Dataset::builder()
+        .read_csv(r"diamonds.csv")
+        .allocate_to_test_data(0.2)
+        .add_input_columns(&[0, 4, 5, 7, 8, 9], Adjustment::NormaliseMean)
+        .add_input_columns(&[1, 2, 3], Adjustment::OneHot)
+        .add_target_columns(
+            &[6],
+            Adjustment::Function(|f| f.parse::<f32>().unwrap_or_default() / 1_000.),
+        )
+        .build();
 
+    let save_path = r"network.txt";
+    let mut net = if PathBuf::from_str(save_path).unwrap().exists() {
+        NN::load(save_path)
+    } else {
+        NN::new(&[set.input_size(), 32, set.target_size()])
+    };
+    //run for 1000 epochs, with batch size 32 and report mse every 10 epochs
+    nn::run_and_report(&set, &mut net, 1000, 32, Some(10));
+    net.save(save_path);
+```

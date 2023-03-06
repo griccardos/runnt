@@ -1,5 +1,6 @@
 use runnt::activation::ActivationType;
 
+//Regression and regularization example
 pub fn main() {
     fastrand::seed(1);
 

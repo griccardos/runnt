@@ -1,12 +1,13 @@
 use runnt::activation::ActivationType;
 
+//Regression example
 pub fn main() {
     fastrand::seed(1);
 
     //Create Neural Network
     let mut nn = runnt::nn::NN::new(&[1, 8, 8, 1])
         .with_hidden_type(ActivationType::Sigmoid) //Non linear Activation function
-        .with_output_type(ActivationType::Sigmoid) //Expected output function
+        .with_output_type(ActivationType::Sigmoid) //Expected output between 0 and 1
         .with_learning_rate(0.5); //Learning rate
 
     //generate function which we want to predict

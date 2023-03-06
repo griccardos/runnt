@@ -1,5 +1,6 @@
 use runnt::activation::ActivationType;
 
+//Classification, non linear example
 pub fn main() {
     fastrand::seed(1);
 

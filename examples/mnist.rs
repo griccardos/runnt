@@ -8,7 +8,7 @@ use runnt::{
     activation::ActivationType,
     nn::{max_index_equal, NN},
 };
-
+//Classification example
 pub fn main() {
     fastrand::seed(1);
 

@@ -1,3 +1,9 @@
+### 0.4.0
+- fixed save/load not working for larger networks
+- fixed save/load not saving regularization
+- added `add_input_column_range` to make it easy to input a large number of columns at once
+- added convenience function to run network for number of epochs, and report `run_and_report`
+
 ### 0.3.0
 - added Dataset manager enabling:
     - one hot encoding (this enables classification)

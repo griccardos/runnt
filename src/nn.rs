@@ -1,11 +1,13 @@
 use std::fmt::Display;
 use std::path::Path;
 use std::str::FromStr;
+use std::time::Instant;
 
 use ndarray::prelude::*;
 use ndarray::Array;
 
 use crate::activation::{activate, activate_der, ActivationType};
+use crate::dataset::Dataset;
 use crate::initialization::{calc_initialization, InitializationType};
 use crate::regularization::Regularization;
 
@@ -357,8 +359,8 @@ impl NN {
         (weight_gradients, bias_gradients)
     }
 
-    ///Apply regularisation to gradients
-    fn regularize(&mut self, weight_gradients: &mut [Array2<f32>]) {
+    ///Apply regularization to gradients
+    fn regularize(&self, weight_gradients: &mut [Array2<f32>]) {
         match self.regularization {
             Regularization::None => {}
             Regularization::L1(lambda) => {
@@ -406,24 +408,36 @@ impl NN {
         vec.push(format!("learning_rate={}", self.learning_rate));
         vec.push(format!("hidden_type={}", self.hidden_type));
         vec.push(format!("output_type={}", self.output_type));
+        vec.push(format!("regularization={}", self.regularization));
+        vec.push(format!(
+            "shape={}",
+            self.shape
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
         let layers = self.shape.len();
         for l in 0..layers - 1 {
             let bias = &self.bias[l]
-                .as_slice()
-                .unwrap()
                 .iter()
-                .map(|x| format!("{x}"))
+                .map(|x| x.to_string())
                 .collect::<Vec<_>>()
                 .join(";");
 
             vec.push(format!("bias={bias}"));
 
             let weights = &self.weights[l]
-                .to_string()
-                .split('\n')
+                .rows()
+                .into_iter()
+                .map(|x| {
+                    x.iter()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<String>>()
+                        .join(",")
+                })
                 .collect::<Vec<_>>()
-                .join(";")
-                .replace(['[', ']', ' '], "");
+                .join(";");
 
             vec.push(format!("weight={weights}"));
 
@@ -445,9 +459,9 @@ impl NN {
         let mut lr = 0.5f32;
         let mut ht = ActivationType::Sigmoid;
         let mut ot = ActivationType::Relu;
+        let mut reg = Regularization::None;
         let mut weights: Vec<Array<f32, Ix2>> = vec![];
         let mut biases: Vec<Array<f32, Ix2>> = vec![];
-
         for line in data {
             if line[0] == "learning_rate" {
                 lr = line[1].parse::<f32>().unwrap_or(0.01);
@@ -455,6 +469,8 @@ impl NN {
                 ht = ActivationType::from_str(&line[1]).unwrap_or(ActivationType::Sigmoid);
             } else if line[0] == "output_type" {
                 ot = ActivationType::from_str(&line[1]).unwrap_or(ActivationType::Linear);
+            } else if line[0] == "regularization" {
+                reg = Regularization::from_str(&line[1]);
             } else if line[0] == "weight" {
                 let ww: Vec<Vec<f32>> = line[1]
                     .split(';')
@@ -464,8 +480,8 @@ impl NN {
                             .collect::<Vec<f32>>()
                     })
                     .collect();
-                let r = dbg!(ww.len());
-                let c = dbg!(ww[0].len());
+                let r = ww.len();
+                let c = ww[0].len();
                 let ww = ww.iter().flatten().copied().collect::<Vec<f32>>();
                 let ww = Array2::from_shape_vec([r, c], ww).unwrap();
                 weights.push(ww);
@@ -478,6 +494,8 @@ impl NN {
                 let bb = Array2::from_shape_vec([1, bb.len()], bb).unwrap();
 
                 biases.push(bb);
+            } else if line[0] == "shape" {
+                //for display only
             }
         }
 
@@ -487,10 +505,10 @@ impl NN {
             network_shape.push(l.shape()[0]);
         }
         network_shape.push(weights.last().unwrap().shape()[1]);
-
         let mut s = Self::new(network_shape.as_slice())
             .with_hidden_type(ht)
             .with_output_type(ot)
+            .with_regularization(reg)
             .with_learning_rate(lr);
 
         s.weights = weights;
@@ -503,6 +521,7 @@ impl NN {
     pub fn get_weights(&self) -> Vec<f32> {
         let mut weights = vec![];
 
+        //for each layer...
         for l in 0..self.weights.len() {
             for i in &self.weights[l] {
                 weights.push(*i);
@@ -515,6 +534,8 @@ impl NN {
     }
 
     ///Sets weights (including biases)
+    /// Uses output of `get_weights`
+    /// Format: layer1weights,layer1biases,layer2weights,layer2biases etc...
     pub fn set_weights(&mut self, weights: &[f32]) {
         let mut counter = 0;
 
@@ -595,6 +616,38 @@ pub fn max_index(vec: &[f32]) -> usize {
         .0
 }
 
+/// Basic Runner that loops through:
+/// 1. getting shuffled data and test data from Dataset
+/// 2. fitting data with batch size
+/// 3. reporting train and test mse
+/// Currently a convenience function. May be removed in the future.
+pub fn run_and_report(
+    set: &Dataset,
+    net: &mut NN,
+    epochs: usize,
+    batch_size: usize,
+    report_epoch: Option<usize>,
+) {
+    let start = Instant::now();
+    println!("epoch train_mse test_mse duration(s)");
+    for e in 1..=epochs {
+        let (inp, tar) = set.get_data();
+        net.fit_batch_size(&inp, &tar, batch_size);
+        if let Some(re) = report_epoch {
+            if re > 0 && e % re == 0 {
+                let train_err = net.forward_errors(&inp, &tar);
+
+                let (inp_test, tar_test) = set.get_test_data();
+                let test_err = net.forward_errors(&inp_test, &tar_test);
+                println!(
+                    "{e} {train_err} {test_err} {:.1}",
+                    start.elapsed().as_secs_f32()
+                );
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -605,6 +658,7 @@ mod tests {
     use crate::activation::ActivationType;
     use crate::initialization::InitializationType;
     use crate::nn::NN;
+    use crate::regularization::Regularization;
 
     #[test]
     /// Test xor nn against known outputs
@@ -769,10 +823,11 @@ mod tests {
     }
     #[test]
     fn test_save_load() {
-        let nn = NN::new(&[10, 10, 10])
+        let nn = NN::new(&[10, 100, 10])
             .with_learning_rate(0.5)
-            .with_hidden_type(ActivationType::Sigmoid)
-            .with_output_type(ActivationType::Sigmoid);
+            .with_regularization(Regularization::L1L2(0.1, 0.2))
+            .with_hidden_type(ActivationType::Tanh)
+            .with_output_type(ActivationType::Relu);
 
         let input = [1., 2., 3., 4., 5., 6., 7., 8., 9., 10.];
         let result1 = nn.forward(&input);
@@ -780,12 +835,15 @@ mod tests {
         let path = temp.path();
 
         //test looks the same
-        let orig = nn.to_string();
-        println!("{orig}");
+        let orig = nn.get_weights();
+        let orig_shape = nn.get_shape();
+        println!("shape:{orig_shape:?} weights:{orig:?}");
         nn.save(&path);
         let nn2 = NN::load(path);
-        let new = nn2.to_string();
-        println!("{new}");
+        let new = nn2.get_weights();
+        let new_shape = nn2.get_shape();
+        println!("shape:{new_shape:?} weights:{new:?}");
+        assert_eq!(orig_shape, new_shape);
         assert_eq!(orig, new);
 
         //test result the same
