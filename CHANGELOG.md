@@ -1,3 +1,7 @@
+### 0.5.0
+- significant speedup with more matrix multiplications
+- add optional accuracy to `run_and_report` for categorisation tasks
+
 ### 0.4.0
 - fixed save/load not working for larger networks
 - fixed save/load not saving regularization
