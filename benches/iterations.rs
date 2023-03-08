@@ -23,14 +23,14 @@ fn forward_and_backward(c: &mut Criterion) {
 
 fn forward_and_backward_batch(c: &mut Criterion) {
     let mut group = c.benchmark_group("forward and back batch");
-    group.throughput(criterion::Throughput::Elements(1));
+    group.throughput(criterion::Throughput::Elements(100));
     group.bench_function("matrix", matrix_batch_iterations_per_second);
 }
 
 fn calc_error(c: &mut Criterion) {
-    let mut group = c.benchmark_group("forward error");
-    group.throughput(criterion::Throughput::Elements(1));
-    group.bench_function("matrix", calc_error_per_second);
+    let mut group = c.benchmark_group("forward error batch");
+    group.throughput(criterion::Throughput::Elements(100));
+    group.bench_function("matrix", batch_forward_error_per_second);
 }
 
 fn matrix_iterations_per_second(b: &mut Bencher) {
@@ -74,16 +74,16 @@ fn matrix_batch_iterations_per_second(b: &mut Bencher) {
     let inputs = inputs.iter().map(|x| x).collect::<Vec<_>>();
     let targets = targets.iter().map(|x| x).collect::<Vec<_>>();
 
-    b.iter(|| nn.fit_batch_size(&inputs, &targets, 50));
+    b.iter(|| nn.fit_batch_size(&inputs, &targets, 100));
 }
 
-fn calc_error_per_second(b: &mut Bencher) {
+fn batch_forward_error_per_second(b: &mut Bencher) {
     let nn = runnt::nn::NN::new(&[10, 100, 50, 10])
         .with_learning_rate(0.01)
         .with_hidden_type(runnt::activation::ActivationType::Sigmoid)
         .with_output_type(runnt::activation::ActivationType::Linear);
 
-    let outputs = (0..100)
+    let inputs = (0..100)
         .into_iter()
         .map(|_| vec![0., 1., 2., 3., 4., 5., 6., 7., 8., 9.])
         .collect::<Vec<Vec<f32>>>();
@@ -91,6 +91,7 @@ fn calc_error_per_second(b: &mut Bencher) {
         .into_iter()
         .map(|_| vec![0., 1., 2., 3., 4., 5., 6., 7., 8., 9.])
         .collect::<Vec<Vec<f32>>>();
-
-    b.iter(|| nn.calc_error(&outputs[0], &targets[0]));
+    let inputs = inputs.iter().map(|x| x).collect::<Vec<_>>();
+    let targets = targets.iter().map(|x| x).collect::<Vec<_>>();
+    b.iter(|| nn.forward_errors(&inputs, &targets));
 }
