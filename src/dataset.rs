@@ -28,10 +28,10 @@ type Targets = Vec<f32>;
 ///
 /// ```rust
 ///   use runnt::dataset::Dataset;
-///   let data=vec![vec![0,1,2,3,4,5,6,7,8,9,10,11,12,13]];
+///   let data=vec![vec![0,1,2,3,4,5,6,7,8,9,10,11,12,13],vec![0,1,2,3,4,5,6,7,8,9,10,11,12,13]];
 ///   let mut set = Dataset::builder()
 ///   .add_data(data)
-///   .allocate_to_test_data(0.2)
+///   .allocate_to_test_data(0.5)
 ///   .add_target_columns(&[13], runnt::dataset::Adjustment::F32)
 ///   .add_input_columns(
 ///       &[0, 1, 2, 4, 5, 6, 7, 9, 10, 11, 12],
@@ -227,16 +227,35 @@ impl DatasetBuilder {
     }
 
     /// Allocates a percentage from train data to test data
-    /// Randomly selects
+    /// Data must already be added
+    /// Randomly selects data to allocate
     /// If you'd prefer, you can also use `add_test_data` to add it directly
+    /// <br>e.g. `allocate_to_test_data(0.2)` will allocate 20% of the data at random to test data
     pub fn allocate_to_test_data(mut self, ratio: f32) -> Self {
         let count = (self.data.len() as f32 * ratio) as usize;
+        assert!(count > 0, "Not enough data to allocate to test data");
         let mut indices = (0..self.data.len()).into_iter().collect::<Vec<_>>();
         fastrand::shuffle(&mut indices);
         let mut indices: Vec<usize> = indices.iter().take(count).copied().collect();
         indices.sort();
         indices.reverse();
         for i in indices {
+            self.test_data.push(self.data.remove(i));
+        }
+        self
+    }
+
+    /// Allocates a range from train data to test data.
+    /// Data must already be added
+    /// This selects the same training data each time
+    /// <br>e.g `.allocate_range_to_test_data(0..=100)`
+    pub fn allocate_range_to_test_data(mut self, range: RangeInclusive<usize>) -> Self {
+        assert!(
+            self.data.len() > 0,
+            "Not enough data to allocate to test data"
+        );
+
+        for i in range {
             self.test_data.push(self.data.remove(i));
         }
         self
@@ -579,6 +598,31 @@ mod tests {
             .build();
         assert_eq!(set.data.len(), 1);
         assert_eq!(set.test_data.len(), 1);
+    }
+
+    #[test]
+    fn test_allocate_range() {
+        fastrand::seed(3);
+        let data = vec![
+            vec!["1", "2", "3"],
+            vec!["4", "5", "6"],
+            vec!["7", "8", "9"],
+        ];
+        let set = Dataset::builder()
+            .add_data(data)
+            .add_input_columns(&[0, 1], Adjustment::F32)
+            .add_target_columns(&[2], Adjustment::F32)
+            .allocate_range_to_test_data(1..=1)
+            .build();
+        assert_eq!(set.data.len(), 2);
+        assert_eq!(set.test_data.len(), 1);
+        assert_eq!(
+            set.test_data
+                .iter()
+                .map(|x| x.0.iter().map(|y| format!("{:0}", y)).collect())
+                .collect::<Vec<Vec<String>>>(),
+            &[["4", "5"]]
+        );
     }
 
     #[test]

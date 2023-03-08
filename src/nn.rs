@@ -36,7 +36,7 @@ pub struct NN {
     weights: Vec<Array2<f32>>, // layer * 2D matrix e.g. [2x2], [2x1]
     bias: Vec<Array2<f32>>,    //layer * 2D matrix
     shape: Vec<usize>,
-    learning_rate: f32,
+    pub learning_rate: f32,
     hidden_type: ActivationType,
     output_type: ActivationType,
     regularization: Regularization,
@@ -830,7 +830,7 @@ mod tests {
     }
     #[test]
     ///use this in documentation
-    fn xor_documentation() {
+    fn readme() {
         let inputs = [[0., 0.], [0., 1.], [1., 0.], [1., 1.]];
         let outputs = [[0.], [1.], [1.], [0.]];
 

@@ -42,7 +42,7 @@ You are welcome to raise an issue or PR if you identify any errors or optimisati
     assert_eq!(nn.forward(&[1., 0.]).first().unwrap().round(), 1.);
     assert_eq!(nn.forward(&[1., 1.]).first().unwrap().round(), 0.);
 ```
-### With Dataset:
+### With Dataset and runner:
 ```rust
  let set = Dataset::builder()
         .read_csv(r"diamonds.csv")
@@ -62,6 +62,6 @@ You are welcome to raise an issue or PR if you identify any errors or optimisati
         NN::new(&[set.input_size(), 32, set.target_size()])
     };
     //run for 1000 epochs, with batch size 32 and report mse every 10 epochs
-    nn::run_and_report(&set, &mut net, 1000, 32, Some(10));
+    nn::run_and_report(&set, &mut net, 1000, 32, Some(10),false);
     net.save(save_path);
 ```

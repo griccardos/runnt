@@ -1,6 +1,8 @@
 ### 0.5.0
 - significant speedup with more matrix multiplications
 - add optional accuracy to `run_and_report` for categorisation tasks
+- added allocate fixed range to test data for dataset `allocate_range_to_test_data`
+- made `learning_rate` pub so it can be changed 
 
 ### 0.4.0
 - fixed save/load not working for larger networks
