@@ -53,6 +53,8 @@ impl NN {
     ///  output layer type: Linear  <br/>
     ///  weight initialization: Random  <br/>
     ///
+    /// #Panics
+    /// If network shape does not have at least 2 layers
 
     pub fn new(network_shape: &[usize]) -> NN {
         let mut weights = vec![];
@@ -60,7 +62,10 @@ impl NN {
         let mut values = vec![];
 
         let layers = network_shape.len();
-        assert!(layers >= 2);
+        assert!(
+            layers >= 2,
+            "Network must have at least 2 layers: input and output"
+        );
 
         for l1 in 0..layers {
             let this_size = network_shape[l1];
@@ -365,7 +370,7 @@ impl NN {
                 //thus dL1/dw = sign(w) * lambda
                 //we adjust current gradients effectively reducing value of weight
                 for (wlayer, gradlayer) in self.weights.iter().zip(weight_gradients.iter_mut()) {
-                    *gradlayer += &(wlayer.mapv(|v| v.signum()) * lambda);
+                    *gradlayer += &(wlayer.mapv(f32::signum) * lambda);
                 }
             }
             Regularization::L2(lambda) => {
@@ -378,7 +383,7 @@ impl NN {
             }
             Regularization::L1L2(l1lambda, l2lambda) => {
                 for (wlayer, gradlayer) in self.weights.iter().zip(weight_gradients.iter_mut()) {
-                    let l1: Array2<f32> = wlayer.mapv(|v| v.signum()) * l1lambda;
+                    let l1: Array2<f32> = wlayer.mapv(f32::signum) * l1lambda;
                     let l2: Array2<f32> = wlayer * l2lambda;
                     *gradlayer += &(l1 + l2);
                 }
@@ -410,7 +415,7 @@ impl NN {
             "shape={}",
             self.shape
                 .iter()
-                .map(|x| x.to_string())
+                .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(",")
         ));
@@ -418,7 +423,7 @@ impl NN {
         for l in 0..layers - 1 {
             let bias = &self.bias[l]
                 .iter()
-                .map(|x| x.to_string())
+                .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(";");
 
@@ -429,7 +434,7 @@ impl NN {
                 .into_iter()
                 .map(|x| {
                     x.iter()
-                        .map(|x| x.to_string())
+                        .map(ToString::to_string)
                         .collect::<Vec<String>>()
                         .join(",")
                 })
@@ -449,6 +454,8 @@ impl NN {
         }
     }
     ///Load from file
+    /// # Panics
+    /// If cannot load file
     pub fn load<P: AsRef<Path>>(path: P) -> Self {
         let data: Vec<Vec<String>> = std::fs::read_to_string(path)
             .expect("Could not load from file")
@@ -608,6 +615,8 @@ impl Display for NN {
 /// Typically the actual will be 1 for a value and zero for else,
 /// whereas the predicted may not be exactly one
 /// So instead we compare the index of the maximum value, to determine equality
+/// # Panics
+/// If target and predicted lengths differ
 pub fn max_index_equal(target: &[f32], predicted: &[f32]) -> bool {
     assert_eq!(
         target.len(),

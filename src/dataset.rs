@@ -198,7 +198,7 @@ impl DatasetBuilder {
             .lines()
             .map(|line| {
                 line.split(sep)
-                    .map(|x| x.to_string())
+                    .map(ToString::to_string)
                     .collect::<Vec<String>>()
             })
             .collect::<Vec<_>>();
@@ -241,7 +241,7 @@ impl DatasetBuilder {
         let mut indices = (0..self.data.len()).into_iter().collect::<Vec<_>>();
         fastrand::shuffle(&mut indices);
         let mut indices: Vec<usize> = indices.iter().take(count).copied().collect();
-        indices.sort();
+        indices.sort_unstable();
         indices.reverse();
         for i in indices {
             self.test_data.push(self.data.remove(i));
@@ -410,7 +410,7 @@ impl DatasetBuilder {
     /// Uses both train and test data to determine
     fn get_mean_sd(&self) -> HashMap<usize, (f32, f32)> {
         let mut mean_var: HashMap<usize, (f32, f32)> = HashMap::default();
-        for col in self.columns.iter() {
+        for col in &self.columns {
             if let Adjustment::NormaliseMean = col.adjustment {
                 let vals = self
                     .data
@@ -438,7 +438,7 @@ impl DatasetBuilder {
     /// Uses both train and test data to determine min/max
     fn get_min_max(&self) -> HashMap<usize, (f32, f32)> {
         let mut min_max: HashMap<usize, (f32, f32)> = HashMap::default();
-        for col in self.columns.iter() {
+        for col in &self.columns {
             if let Adjustment::NormaliseMinMax(_, _) = col.adjustment {
                 let vals = self
                     .data
@@ -449,12 +449,12 @@ impl DatasetBuilder {
 
                 let min: f32 = vals
                     .iter()
-                    .cloned()
+                    .copied()
                     .min_by(|a, b| a.partial_cmp(b).expect("No NAN"))
                     .expect("Data is not empty");
                 let max: f32 = vals
                     .iter()
-                    .cloned()
+                    .copied()
                     .max_by(|a, b| a.partial_cmp(b).expect("No NAN"))
                     .expect("Data is not empty");
 
@@ -469,13 +469,13 @@ impl DatasetBuilder {
     /// Uses both train and test data because there may be items in test data which are not in training data
     fn get_one_hot(&self) -> HashMap<usize, HashMap<String, Vec<f32>>> {
         let mut onehot: HashMap<usize, HashMap<String, Vec<f32>>> = HashMap::default();
-        for col in self.columns.iter() {
+        for col in &self.columns {
             if let Adjustment::OneHot = col.adjustment {
                 let uniq = self
                     .data
                     .iter()
                     .chain(&self.test_data)
-                    .map(|line| line[col.index].to_owned())
+                    .map(|line| line[col.index].clone())
                     .collect::<HashSet<String>>();
                 let mut vals = Vec::from_iter(uniq);
 
@@ -485,7 +485,7 @@ impl DatasetBuilder {
                 for (i, str) in vals.iter().enumerate() {
                     let mut vec: Vec<f32> = std::iter::repeat(0.).take(vals.len()).collect();
                     vec[i] = 1.;
-                    hash.insert(str.to_owned(), vec);
+                    hash.insert(str.clone(), vec);
                 }
                 onehot.insert(col.index, hash);
             }
@@ -520,7 +520,7 @@ impl DatasetBuilder {
                 first_len,
                 l.len(),
                 "Some columns do not have the same number of columns as first line {l:?}"
-            )
+            );
         }
 
         let (mintrainlen, trainline) = self

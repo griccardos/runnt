@@ -15,7 +15,7 @@ impl Regularization {
         if let Some((t, vs)) = line.split_once(':') {
             return match (t, vs) {
                 ("L1", vs) => Regularization::L1(vs.parse::<f32>().unwrap_or_default()),
-                ("L2", vs) => Regularization::L1(vs.parse::<f32>().unwrap_or_default()),
+                ("L2", vs) => Regularization::L2(vs.parse::<f32>().unwrap_or_default()),
                 ("L1L2", vs) => {
                     if let Some((v1, v2)) = vs.split_once(',') {
                         Regularization::L1L2(
