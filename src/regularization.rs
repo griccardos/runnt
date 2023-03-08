@@ -30,7 +30,7 @@ impl Regularization {
                 _ => Regularization::None,
             };
         }
-        return Regularization::None;
+        Regularization::None
     }
 }
 

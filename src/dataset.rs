@@ -188,7 +188,11 @@ impl DatasetBuilder {
                 seps.entry(char).and_modify(|x| *x += 1);
             }
         }
-        let sep = *seps.iter().max_by(|a, b| a.1.cmp(b.1)).unwrap().0;
+        let sep = *seps
+            .iter()
+            .max_by(|a, b| a.1.cmp(b.1))
+            .expect("hashmap should not be empty")
+            .0;
         let data = data
             .as_str()
             .lines()
@@ -251,7 +255,7 @@ impl DatasetBuilder {
     /// <br>e.g `.allocate_range_to_test_data(0..=100)`
     pub fn allocate_range_to_test_data(mut self, range: RangeInclusive<usize>) -> Self {
         assert!(
-            self.data.len() > 0,
+            !self.data.is_empty(),
             "Not enough data to allocate to test data"
         );
 
@@ -446,13 +450,13 @@ impl DatasetBuilder {
                 let min: f32 = vals
                     .iter()
                     .cloned()
-                    .min_by(|a, b| a.partial_cmp(b).unwrap())
-                    .unwrap();
+                    .min_by(|a, b| a.partial_cmp(b).expect("No NAN"))
+                    .expect("Data is not empty");
                 let max: f32 = vals
                     .iter()
                     .cloned()
-                    .max_by(|a, b| a.partial_cmp(b).unwrap())
-                    .unwrap();
+                    .max_by(|a, b| a.partial_cmp(b).expect("No NAN"))
+                    .expect("Data is not empty");
 
                 min_max.insert(col.index, (min, max));
             }

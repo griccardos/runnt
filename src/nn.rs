@@ -152,9 +152,9 @@ impl NN {
         let targets_matrix = self.to_matrix(targets);
 
         let values = self.internal_forward(&inputs_matrix);
-        let outputs = values.last().unwrap().clone();
+        let outputs = values.last().expect("There should be outputs").clone();
         let loss = self.output_loss(&outputs, &targets_matrix);
-        let (mut weights, biases) = self.backwards(values, loss.clone());
+        let (mut weights, biases) = self.backwards(values, loss);
 
         self.regularize(&mut weights);
 
@@ -167,20 +167,20 @@ impl NN {
     fn to_matrix(&self, vec: &[&Vec<f32>]) -> Array2<f32> {
         Array2::from_shape_vec(
             (vec.len(), vec[0].len()),
-            vec.iter()
-                .map(|x| x.to_owned())
-                .flatten()
-                .copied()
-                .collect(),
+            vec.iter().flat_map(|x| x.to_owned()).copied().collect(),
         )
-        .unwrap()
+        .expect("shape not allowed by size of vec")
     }
 
     /// Forward inputs into the network, and returns output result i.e. `prediction`
     pub fn forward(&self, input: &[f32]) -> Vec<f32> {
-        let inputs = self.to_matrix(&vec![&input.to_vec()]);
+        let inputs = self.to_matrix(&[&input.to_vec()]);
         let values = self.internal_forward(&inputs);
-        values.last().unwrap().clone().into_raw_vec()
+        values
+            .last()
+            .expect("There should be outputs")
+            .clone()
+            .into_raw_vec()
     }
 
     /// Forward inputs to get error
@@ -191,23 +191,25 @@ impl NN {
 
     /// Forward batch, and get mean error
     pub fn forward_errors(&self, inputs: &[&Vec<f32>], targets: &[&Vec<f32>]) -> f32 {
-        let inputs = self.to_matrix(&inputs);
-        let targets = self.to_matrix(&targets);
+        let inputs = self.to_matrix(inputs);
+        let targets = self.to_matrix(targets);
         self.internal_forward_errors(&inputs, &targets)
     }
 
     fn internal_forward_errors(&self, inputs: &Array2<f32>, targets: &Array2<f32>) -> f32 {
         let count = inputs.shape()[0];
         let vals = self.internal_forward(inputs);
-        let outs = vals.last().unwrap();
-        let errs = self.internal_calc_errors(&outs, &targets);
+        let outs = vals.last().expect("There should be outputs");
+        let errs = self.internal_calc_errors(outs, targets);
         errs.iter().sum::<f32>() / count as f32
     }
 
     ///calcs error based on outputs and target
     pub fn calc_error(&self, outputs: &[f32], target: &[f32]) -> f32 {
-        let outputs = Array2::from_shape_vec((1, outputs.len()), outputs.to_vec()).unwrap();
-        let target = Array2::from_shape_vec((1, target.len()), target.to_vec()).unwrap();
+        let outputs =
+            Array2::from_shape_vec((1, outputs.len()), outputs.to_vec()).expect("Shape is correct");
+        let target =
+            Array2::from_shape_vec((1, target.len()), target.to_vec()).expect("Shape is correct");
 
         self.internal_calc_errors(&outputs, &target)[0]
     }
@@ -436,13 +438,20 @@ impl NN {
 
             vec.push(format!("weight={weights}"));
 
-            std::fs::write(path.as_ref(), vec.join("\n")).unwrap();
+            let result = std::fs::write(path.as_ref(), vec.join("\n"));
+            if let Err(err) = result {
+                println!(
+                    "Could not write file {:?}: {}",
+                    path.as_ref().as_os_str(),
+                    err
+                );
+            }
         }
     }
     ///Load from file
     pub fn load<P: AsRef<Path>>(path: P) -> Self {
         let data: Vec<Vec<String>> = std::fs::read_to_string(path)
-            .unwrap()
+            .expect("Could not load from file")
             .split('\n')
             .map(|x| {
                 x.split('=')
@@ -451,12 +460,13 @@ impl NN {
             })
             .collect();
 
-        let mut lr = 0.5f32;
+        let mut lr = 0.01f32;
         let mut ht = ActivationType::Sigmoid;
-        let mut ot = ActivationType::Relu;
+        let mut ot = ActivationType::Linear;
         let mut reg = Regularization::None;
         let mut weights: Vec<Array<f32, Ix2>> = vec![];
         let mut biases: Vec<Array<f32, Ix2>> = vec![];
+        let mut network_shape = vec![];
         for line in data {
             if line[0] == "learning_rate" {
                 lr = line[1].parse::<f32>().unwrap_or(0.01);
@@ -478,7 +488,7 @@ impl NN {
                 let r = ww.len();
                 let c = ww[0].len();
                 let ww = ww.iter().flatten().copied().collect::<Vec<f32>>();
-                let ww = Array2::from_shape_vec([r, c], ww).unwrap();
+                let ww = Array2::from_shape_vec([r, c], ww).expect("Shape is wrong for vec");
                 weights.push(ww);
             } else if line[0] == "bias" {
                 let bb = line[1]
@@ -486,21 +496,29 @@ impl NN {
                     .map(|f| f.parse::<f32>().unwrap_or_default())
                     .collect::<Vec<f32>>();
                 let bb = bb;
-                let bb = Array2::from_shape_vec([1, bb.len()], bb).unwrap();
+                let bb = Array2::from_shape_vec([1, bb.len()], bb).expect("Shape is wrong for vec");
 
                 biases.push(bb);
             } else if line[0] == "shape" {
-                //for display only
+                network_shape = line[1]
+                    .split(',')
+                    .map(|f| f.parse::<usize>().unwrap_or_default())
+                    .collect::<Vec<usize>>();
             }
         }
 
-        let mut network_shape = vec![];
-
+        let mut weight_shape = vec![];
         for l in &weights {
-            network_shape.push(l.shape()[0]);
+            weight_shape.push(l.shape()[0]);
         }
-        network_shape.push(weights.last().unwrap().shape()[1]);
-        let mut s = Self::new(network_shape.as_slice())
+        weight_shape.push(weights.last().expect("There should be weights").shape()[1]);
+
+        assert_eq!(
+            network_shape, weight_shape,
+            "Weight shape does not equal to shape"
+        );
+
+        let mut s = Self::new(&network_shape)
             .with_hidden_type(ht)
             .with_output_type(ot)
             .with_regularization(reg)
@@ -647,7 +665,7 @@ pub fn run_and_report(
                 if report_accuracy {
                     let mut train_count = 0;
                     for (inp, tar) in inp.iter().zip(tar) {
-                        let pred = net.forward(&inp);
+                        let pred = net.forward(inp);
                         if max_index_equal(tar, &pred) {
                             train_count += 1;
                         }
@@ -655,7 +673,7 @@ pub fn run_and_report(
 
                     let mut test_count = 0;
                     for (inp, tar) in inp_test.iter().zip(tar_test) {
-                        let pred = net.forward(&inp);
+                        let pred = net.forward(inp);
                         if max_index_equal(tar, &pred) {
                             test_count += 1;
                         }
