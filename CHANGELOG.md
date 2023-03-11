@@ -1,3 +1,7 @@
+### 0.5.1
+- changed pass in borrowed data to add_data for dataset
+- added 2 moons example
+
 ### 0.5.0
 - significant speedup with more matrix multiplications
 - add optional accuracy to `run_and_report` for categorisation tasks

@@ -3,7 +3,7 @@ use runnt::{
     nn::{self, NN},
 };
 
-//Classification example
+//Example of: Classification, Dataset, run_and_report
 pub fn main() {
     //generate circular data, everything outside the circle is 0, and inside is 1
     //circle has radius 5
@@ -31,7 +31,7 @@ pub fn main() {
         .map(|x| x.iter().map(|x| x.to_string()).collect::<Vec<_>>())
         .collect::<Vec<_>>();
     let set = Dataset::builder()
-        .add_data(data)
+        .add_data(&data)
         .allocate_to_test_data(0.1)
         .add_input_columns_range(0..=1, Adjustment::F32)
         .add_target_columns(&[2], Adjustment::OneHot)

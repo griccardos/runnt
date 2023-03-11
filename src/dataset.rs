@@ -205,10 +205,12 @@ impl DatasetBuilder {
         let headers = data[0].clone();
         let data = data[1..].to_vec();
 
-        self.add_column_headers(headers).add_data(data)
+        self.add_column_headers(headers).add_data(&data)
     }
 
-    pub fn add_data<T: ToString>(mut self, data: Vec<Vec<T>>) -> Self {
+    ///Adds data from a vec.
+    /// This can be f32, i32, String etc., whatever can be converted into a string, and then parsed as an f32
+    pub fn add_data<T: ToString>(mut self, data: &Vec<Vec<T>>) -> Self {
         self.data.extend(
             data.into_iter()
                 .map(|x| x.into_iter().map(|y| y.to_string()).collect()),
@@ -216,7 +218,7 @@ impl DatasetBuilder {
         self
     }
 
-    pub fn add_test_data<T: ToString>(mut self, test_data: Vec<Vec<T>>) -> Self {
+    pub fn add_test_data<T: ToString>(mut self, test_data: &Vec<Vec<T>>) -> Self {
         self.test_data.extend(
             test_data
                 .into_iter()
@@ -579,7 +581,7 @@ mod tests {
         fastrand::seed(1);
         let data = vec![vec!["1", "2", "3"], vec!["4", "5", "6"]];
         let set = Dataset::builder()
-            .add_data(data)
+            .add_data(&data)
             .add_input_columns(&[0, 1], Adjustment::F32)
             .add_target_columns(&[2], Adjustment::F32)
             .build();
@@ -593,9 +595,9 @@ mod tests {
     #[test]
     fn test_allocate_test() {
         fastrand::seed(3);
-        let data = vec![vec!["1", "2", "3"], vec!["4", "5", "6"]];
+        let data = vec![vec![1, 2, 3], vec![4, 5, 6]];
         let set = Dataset::builder()
-            .add_data(data)
+            .add_data(&data)
             .add_input_columns(&[0, 1], Adjustment::F32)
             .add_target_columns(&[2], Adjustment::F32)
             .allocate_to_test_data(0.5)
@@ -613,7 +615,7 @@ mod tests {
             vec!["7", "8", "9"],
         ];
         let set = Dataset::builder()
-            .add_data(data)
+            .add_data(&data)
             .add_input_columns(&[0, 1], Adjustment::F32)
             .add_target_columns(&[2], Adjustment::F32)
             .allocate_range_to_test_data(1..=1)
@@ -634,7 +636,7 @@ mod tests {
         fastrand::seed(3);
         let data = vec![vec!["1", "2", "3"], vec!["4", "5", "6"]];
         let set = Dataset::builder()
-            .add_data(data)
+            .add_data(&data)
             .add_input_columns(&[0, 1], Adjustment::F32)
             .add_target_columns(&[2], Adjustment::F32)
             .allocate_to_test_data(0.5)
@@ -653,7 +655,7 @@ mod tests {
         fastrand::seed(3);
         let data = vec![vec!["1", "2", "3"], vec!["4", "5", "6"]];
         let set = Dataset::builder()
-            .add_data(data)
+            .add_data(&data)
             .allocate_to_test_data(0.5)
             .add_input_columns(&[0, 1], Adjustment::F32)
             .add_target_columns(&[2], Adjustment::F32)
@@ -675,7 +677,7 @@ mod tests {
     #[should_panic]
     fn test_assert_noinputcolumns() {
         let data = vec![vec!["1", "2", "3"], vec!["4", "5", "6"]];
-        Dataset::builder().add_data(data).build();
+        Dataset::builder().add_data(&data).build();
     }
 
     #[test]
@@ -683,7 +685,7 @@ mod tests {
     fn test_assert_notargetcolumns() {
         let data = vec![vec!["1", "2", "3"], vec!["4", "5", "6"]];
         Dataset::builder()
-            .add_data(data)
+            .add_data(&data)
             .add_input_columns(&[0], Adjustment::F32)
             .build();
     }
@@ -692,7 +694,7 @@ mod tests {
     fn test_builds_with_basic() {
         let data = vec![vec!["1", "2", "3"], vec!["4", "5", "6"]];
         Dataset::builder()
-            .add_data(data)
+            .add_data(&data)
             .add_input_columns(&[0], Adjustment::F32)
             .add_target_columns(&[2], Adjustment::F32)
             .build();

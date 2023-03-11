@@ -253,7 +253,11 @@ impl NN {
     /// each value is in a different column
     /// so for 32 examples in a 10 node layer we have 32x10 matrix
     fn internal_forward(&self, input: &Array2<f32>) -> Vec<Array2<f32>> {
-        assert_eq!(input.shape()[1], self.shape[0]); //columns = number of nodes in first layer
+        assert_eq!(
+            input.shape()[1],
+            self.shape[0],
+            "Input size does not equal first layer size"
+        ); //columns = number of nodes in first layer
 
         let example_count = input.shape()[0];
 

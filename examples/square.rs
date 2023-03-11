@@ -56,7 +56,7 @@ pub fn main() {
 
     let mut mse_sum = 0.;
     //high iterations because we want to overfit...
-    for step in 1..5_000_000 {
+    for step in 1..2_000_000 {
         let rand_index = fastrand::usize(0..inp_out.len());
 
         //Stochastic gradient descent
