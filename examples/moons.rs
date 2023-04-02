@@ -30,8 +30,8 @@ pub fn main() {
     let set = Dataset::builder()
         .add_data(&inp_out)
         .allocate_to_test_data(0.2)
-        .add_input_columns(&[0, 1], runnt::dataset::Adjustment::F32)
-        .add_target_columns(&[2], runnt::dataset::Adjustment::OneHot)
+        .add_input_columns(&[0, 1], runnt::dataset::Conversion::F32)
+        .add_target_columns(&[2], runnt::dataset::Conversion::OneHot)
         .build();
 
     //Create Neural Network
@@ -40,17 +40,24 @@ pub fn main() {
         .with_output_type(ActivationType::Linear)
         .with_learning_rate(0.5); //Learning rate
 
-    runnt::nn::run_and_report(&set, &mut nn, 100, 1, Some(10), true);
+    runnt::nn::run_and_report(
+        &set,
+        &mut nn,
+        100,
+        1,
+        10,
+        runnt::nn::ReportMetric::CorrectClassification,
+    );
 
     println!("x,y,tar,predicted");
-    set.get_test_data_zip().iter().take(100).for_each(|x| {
+    set.get_test_data_zip().iter().take(400).for_each(|x| {
         let pred = nn.forward(&x.0);
         println!(
-            "{},{},{},{},",
+            "{},{},{},{}",
             x.0[0],
             x.0[1],
             max_index(x.1),
-            max_index(&pred)
+            max_index(&pred),
         );
     });
 }

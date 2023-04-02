@@ -1,9 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-    ops::RangeInclusive,
-    path::Path,
-};
+use std::{borrow::Cow, collections::HashMap, fmt::Debug, ops::RangeInclusive, path::Path};
 
 type Inputs = Vec<f32>;
 type Targets = Vec<f32>;
@@ -30,14 +25,14 @@ type Targets = Vec<f32>;
 ///   use runnt::dataset::Dataset;
 ///   let data=vec![vec![0,1,2,3,4,5,6,7,8,9,10,11,12,13],vec![0,1,2,3,4,5,6,7,8,9,10,11,12,13]];
 ///   let mut set = Dataset::builder()
-///   .add_data(data)
+///   .add_data(&data)
 ///   .allocate_to_test_data(0.5)
-///   .add_target_columns(&[13], runnt::dataset::Adjustment::F32)
+///   .add_target_columns(&[13], runnt::dataset::Conversion::F32)
 ///   .add_input_columns(
 ///       &[0, 1, 2, 4, 5, 6, 7, 9, 10, 11, 12],
-///       runnt::dataset::Adjustment::NormaliseMean,
+///       runnt::dataset::Conversion::NormaliseMean,
 ///   )
-///   .add_input_columns(&[3, 8], runnt::dataset::Adjustment::OneHot)
+///   .add_input_columns(&[3, 8], runnt::dataset::Conversion::OneHot)
 ///   .build();
 /// ```
 pub struct Dataset {
@@ -66,7 +61,7 @@ impl Dataset {
     /// Returns shuffled data into a Vec of inputs, and a Vec of targets
     /// easier for forward and fit
     pub fn get_data(&self) -> (Vec<&Inputs>, Vec<&Targets>) {
-        self.get_shuffled_data(&self.data)
+        Dataset::get_shuffled_data(&self.data)
     }
     // returns shuffled data into a zipped Vec of (Input,Output)
     // easier for reporting
@@ -77,24 +72,24 @@ impl Dataset {
 
     /// Returns shuffled test data
     pub fn get_test_data(&self) -> (Vec<&Inputs>, Vec<&Targets>) {
-        self.get_shuffled_data(&self.test_data)
+        Dataset::get_shuffled_data(&self.test_data)
     }
 
     // returns shuffled test data into a zipped Vec of (Input,Output)
     // easier for reporting
     pub fn get_test_data_zip(&self) -> Vec<(&Inputs, &Targets)> {
-        let (inp, out) = self.get_data();
+        let (inp, out) = self.get_test_data();
         inp.into_iter().zip(out).collect()
     }
 
-    fn get_shuffled_data(&self, data: &Vec<(Inputs, Targets)>) -> (Vec<&Inputs>, Vec<&Targets>) {
+    fn get_shuffled_data(data: &'_ Vec<(Inputs, Targets)>) -> (Vec<&'_ Inputs>, Vec<&'_ Targets>) {
         let mut indices = (0..data.len()).into_iter().collect::<Vec<_>>();
         fastrand::shuffle(&mut indices);
         let mut vecin = vec![];
         let mut vectar = vec![];
         for i in indices {
-            vecin.push(&self.data[i].0);
-            vectar.push(&self.data[i].1);
+            vecin.push(&data[i].0);
+            vectar.push(&data[i].1);
         }
 
         (vecin, vectar)
@@ -124,8 +119,8 @@ impl Dataset {
 /// `OneHot` - Creates new column for each one of the unique values with 1 for that and 0 for others <br/>
 /// `Function(fn(&str) -> f32)` - Applies function to convert to f32 <br/>
 
-pub enum Adjustment {
-    ///Converts string to f32
+pub enum Conversion {
+    ///Converts string to f32.
     F32,
     ///Normalises based on field values (x-mean)/stddev
     NormaliseMean,
@@ -133,18 +128,22 @@ pub enum Adjustment {
     NormaliseMinMax(f32, f32),
     /// Creates new column for each one of the unique values with 1 for that and 0 for others
     OneHot,
+    /// Creates new column for each one of the unique values with 1 for that and 0 for others
+    /// Keeps only top N by count. replaces others with "Other"
+    OneHotTop(usize),
     ///Applies function to convert to f32
     Function(fn(&str) -> f32),
 }
 
-impl Debug for Adjustment {
+impl Debug for Conversion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let val = match self {
-            Adjustment::F32 => "F32",
-            Adjustment::NormaliseMean => "NormaliseMean",
-            Adjustment::NormaliseMinMax(_, _) => "NormaliseMinMax",
-            Adjustment::OneHot => "OneHot",
-            Adjustment::Function(_) => "Function",
+            Conversion::F32 => "F32",
+            Conversion::NormaliseMean => "NormaliseMean",
+            Conversion::NormaliseMinMax(_, _) => "NormaliseMinMax",
+            Conversion::OneHot => "OneHot",
+            Conversion::Function(_) => "Function",
+            Conversion::OneHotTop(_) => "OneHotTop",
         };
         write!(f, "{val}")
     }
@@ -156,10 +155,10 @@ enum Location {
     Target,
 }
 
-#[derive(Debug)]
 struct Column {
     index: usize,
-    adjustment: Adjustment,
+    pre_adjustment: Option<fn(&str) -> String>,
+    conversion: Conversion,
     location: Location,
 }
 
@@ -210,19 +209,19 @@ impl DatasetBuilder {
 
     ///Adds data from a vec.
     /// This can be f32, i32, String etc., whatever can be converted into a string, and then parsed as an f32
-    pub fn add_data<T: ToString>(mut self, data: &Vec<Vec<T>>) -> Self {
+    pub fn add_data<T: ToString>(mut self, data: &[Vec<T>]) -> Self {
         self.data.extend(
-            data.into_iter()
-                .map(|x| x.into_iter().map(|y| y.to_string()).collect()),
+            data.iter()
+                .map(|x| x.iter().map(|y| y.to_string()).collect()),
         );
         self
     }
 
-    pub fn add_test_data<T: ToString>(mut self, test_data: &Vec<Vec<T>>) -> Self {
+    pub fn add_test_data<T: ToString>(mut self, test_data: &[Vec<T>]) -> Self {
         self.test_data.extend(
             test_data
-                .into_iter()
-                .map(|x| x.into_iter().map(|y| y.to_string()).collect()),
+                .iter()
+                .map(|x| x.iter().map(|y| y.to_string()).collect()),
         );
         self
     }
@@ -246,8 +245,10 @@ impl DatasetBuilder {
         indices.sort_unstable();
         indices.reverse();
         for i in indices {
-            self.test_data.push(self.data.remove(i));
+            let removed = self.data.remove(i);
+            self.test_data.push(removed);
         }
+
         self
     }
 
@@ -267,36 +268,57 @@ impl DatasetBuilder {
         self
     }
 
+    /// Add input column zero indexed
+    /// With pre adjustment if necessary (&str to String)
+    /// e.g. `.add_input_column(&[0,4],|x|x.to_lowercase(), Conversion::F32)`
+    pub fn add_input_column(
+        mut self,
+        index: usize,
+        pre_adjustment: fn(&str) -> String,
+        conversion: Conversion,
+    ) -> Self {
+        self.columns.push(Column {
+            index,
+            pre_adjustment: Some(pre_adjustment),
+            conversion,
+            location: Location::Input,
+        });
+
+        self
+    }
+
     /// Add inputs from columns zero indexed
-    /// e.g. `.add_input_columns(&[0,4],Adjustment::F32)`
-    pub fn add_input_columns(mut self, indexes: &[usize], adjustment: Adjustment) -> Self {
+    /// e.g. `.add_input_columns(&[0,4],Conversion::F32)`
+    pub fn add_input_columns(mut self, indexes: &[usize], conversion: Conversion) -> Self {
         for &index in indexes {
             self.columns.push(Column {
                 index,
-                adjustment,
+                pre_adjustment: None,
+                conversion,
                 location: Location::Input,
             });
         }
         self
     }
     /// Add inputs from columns as zero indexed range
-    /// e.g. `.add_input_columns(0..=4,Adjustment::F32)`
+    /// e.g. `.add_input_columns(0..=4,Conversion::F32)`
     pub fn add_input_columns_range(
         mut self,
         range: RangeInclusive<usize>,
-        adjustment: Adjustment,
+        conversion: Conversion,
     ) -> Self {
         for index in range {
-            self = self.add_input_columns(&[index], adjustment);
+            self = self.add_input_columns(&[index], conversion);
         }
         self
     }
 
-    pub fn add_target_columns(mut self, indexes: &[usize], adjustment: Adjustment) -> Self {
+    pub fn add_target_columns(mut self, indexes: &[usize], conversion: Conversion) -> Self {
         for &index in indexes {
             self.columns.push(Column {
                 index,
-                adjustment,
+                pre_adjustment: None,
+                conversion,
                 location: Location::Target,
             });
         }
@@ -305,35 +327,34 @@ impl DatasetBuilder {
 
     pub fn build(&self) -> Dataset {
         self.asserts();
-
-        let col_stats = ColumnStats {
-            mean_sd: self.get_mean_sd(),
-            min_max: self.get_min_max(),
-            one_hot: self.get_one_hot(),
-        };
-
+        let col_stats = self.get_column_stats();
         let input_labels = self.get_labels(&col_stats, Location::Input);
         let target_labels = self.get_labels(&col_stats, Location::Target);
+
         let (traininputs, traintargets) = self.transform(&self.data, &col_stats);
         let (testinputs, testtargets) = self.transform(&self.test_data, &col_stats);
 
+        let data = traininputs
+            .into_iter()
+            .zip(traintargets)
+            .map(|(i, o)| (i, o))
+            .collect();
+
+        let test_data = testinputs
+            .into_iter()
+            .zip(testtargets)
+            .map(|(i, o)| (i, o))
+            .collect();
+
         Dataset {
-            data: traininputs
-                .into_iter()
-                .zip(traintargets)
-                .map(|(i, o)| (i, o))
-                .collect(),
-            test_data: testinputs
-                .into_iter()
-                .zip(testtargets)
-                .map(|(i, o)| (i, o))
-                .collect(),
+            data,
+            test_data,
             input_labels,
             target_labels,
         }
     }
 
-    fn get_labels(&self, cstats: &ColumnStats, location: Location) -> Vec<String> {
+    fn get_labels(&self, cstats: &[ColumnStats], location: Location) -> Vec<String> {
         let headers: Vec<String> = if self.headers.is_empty() {
             self.data[0]
                 .iter()
@@ -346,18 +367,19 @@ impl DatasetBuilder {
 
         let mut labels = vec![];
 
-        for col in &self.columns {
+        for (i, col) in self.columns.iter().enumerate() {
             if col.location == location {
-                match col.adjustment {
-                    Adjustment::OneHot => {
-                        let mut strings: Vec<String> =
-                            cstats.one_hot[&col.index].keys().cloned().collect();
-                        //we store in alphabetical
-                        strings.sort_by_key(|a| a.to_lowercase());
-                        strings
-                            .iter_mut()
-                            .for_each(|x| *x = format!("{}_{x}", headers[col.index]));
-                        labels.extend(strings);
+                match col.conversion {
+                    Conversion::OneHot | Conversion::OneHotTop(_) => {
+                        if let ColumnStats::OneHot(oh) = &cstats[i] {
+                            let mut strings: Vec<String> = oh.keys().cloned().collect();
+                            //we store in alphabetical
+                            strings.sort_by_key(|a| a.to_lowercase());
+                            strings
+                                .iter_mut()
+                                .for_each(|x| *x = format!("{}_{x}", headers[col.index]));
+                            labels.extend(strings);
+                        }
                     }
                     _ => labels.push(headers[col.index].clone()),
                 }
@@ -369,31 +391,64 @@ impl DatasetBuilder {
     fn transform(
         &self,
         data: &Vec<Vec<String>>,
-        cstats: &ColumnStats,
+        cstats: &[ColumnStats],
     ) -> (Vec<Inputs>, Vec<Targets>) {
         let mut indata = vec![];
         let mut outdata = vec![];
-
         for line in data {
             let mut newin = vec![];
             let mut newout = vec![];
-            for col in &self.columns {
-                let val = &line[col.index];
-                let newval: Vec<f32> = match col.adjustment {
-                    Adjustment::F32 => vec![val.parse::<f32>().unwrap_or_default()],
-                    Adjustment::NormaliseMean => {
-                        let val = val.parse::<f32>().unwrap_or_default();
-                        let mean = cstats.mean_sd[&col.index].0;
-                        let sd = cstats.mean_sd[&col.index].1.max(0.001); //must not be 0
-                        vec![(val - mean) / sd]
+            for (i, col) in self.columns.iter().enumerate() {
+                let val = if let Some(fun) = col.pre_adjustment {
+                    Cow::from(fun(&line[col.index]))
+                } else {
+                    Cow::from(&line[col.index])
+                };
+                let newval: Vec<f32> = match col.conversion {
+                    Conversion::F32 => vec![val.parse::<f32>().unwrap_or_default()],
+                    Conversion::NormaliseMean => {
+                        if let ColumnStats::MeanSd(mean, sd) = cstats[i] {
+                            let val = val.parse::<f32>().unwrap_or_default();
+                            let sd = sd.max(0.001); //must not be 0
+                            vec![(val - mean) / sd]
+                        } else {
+                            panic!("Should have mean,sd");
+                        }
                     }
-                    Adjustment::OneHot => cstats.one_hot[&col.index][val].clone(),
-                    Adjustment::Function(f) => vec![f(val)],
-                    Adjustment::NormaliseMinMax(lower, upper) => {
-                        let val = val.parse::<f32>().unwrap_or_default();
-                        let min = cstats.min_max[&col.index].0;
-                        let max = cstats.min_max[&col.index].1;
-                        vec![(val - min) / (max - min) * (upper - lower) + lower]
+                    Conversion::OneHot => {
+                        if let ColumnStats::OneHot(oh) = &cstats[i] {
+                            if !oh.contains_key(val.as_ref()) {
+                                println!("ERROR! does not contain {val}");
+                            }
+                            oh[val.as_ref()].clone()
+                        } else {
+                            panic!("Should have one hot")
+                        }
+                    }
+                    Conversion::OneHotTop(_) => {
+                        if let ColumnStats::OneHot(oh) = &cstats[i] {
+                            let key = if oh.contains_key(val.as_ref()) {
+                                &val
+                            } else {
+                                "Other"
+                            };
+                            oh[key].clone()
+                        } else {
+                            panic!("Should have one hot")
+                        }
+                    }
+                    Conversion::Function(f) => vec![f(&val)],
+                    Conversion::NormaliseMinMax(lower, upper) => {
+                        if let ColumnStats::MinMax(min, max) = cstats[i] {
+                            let val = val.parse::<f32>().unwrap_or_default();
+                            let mut source_range = max - min;
+                            if source_range == 0. {
+                                source_range = 0.00001; //prevent divide by zero
+                            }
+                            vec![(val - min) / (source_range) * (upper - lower) + lower]
+                        } else {
+                            panic!("Should have min max");
+                        }
                     }
                 };
 
@@ -408,92 +463,117 @@ impl DatasetBuilder {
         (indata, outdata)
     }
 
+    fn get_column_stats(&self) -> Vec<ColumnStats> {
+        let mut stats = vec![];
+        for col in &self.columns {
+            let data = self
+                .data
+                .iter()
+                .chain(&self.test_data)
+                .map(|a| &a[col.index])
+                .map(|a| {
+                    if let Some(fun) = col.pre_adjustment {
+                        Cow::from(fun(a)) //perform calc
+                    } else {
+                        Cow::from(a) //if no adj, we just use ref to string
+                    }
+                })
+                .collect::<Vec<Cow<str>>>(); //will either be string or &str
+
+            let sta = match col.conversion {
+                Conversion::F32 => ColumnStats::None,
+                Conversion::NormaliseMean => {
+                    let ms = self.get_mean_sd(&data);
+                    ColumnStats::MeanSd(ms.0, ms.1)
+                }
+                Conversion::NormaliseMinMax(_, _) => {
+                    let mm = self.get_min_max(&data);
+                    ColumnStats::MinMax(mm.0, mm.1)
+                }
+                Conversion::OneHot => {
+                    let oh = self.get_one_hot(&data, None);
+                    ColumnStats::OneHot(oh)
+                }
+                Conversion::Function(_) => ColumnStats::None,
+                Conversion::OneHotTop(max) => {
+                    let oh = self.get_one_hot(&data, Some(max));
+                    ColumnStats::OneHot(oh)
+                }
+            };
+            stats.push(sta);
+        }
+        stats
+    }
     /// returns the mean and standard deviation for the column
     /// Uses both train and test data to determine
-    fn get_mean_sd(&self) -> HashMap<usize, (f32, f32)> {
-        let mut mean_var: HashMap<usize, (f32, f32)> = HashMap::default();
-        for col in &self.columns {
-            if let Adjustment::NormaliseMean = col.adjustment {
-                let vals = self
-                    .data
-                    .iter()
-                    .chain(&self.test_data)
-                    .map(|line| line[col.index].parse::<f32>().unwrap_or_default())
-                    .collect::<Vec<_>>();
+    fn get_mean_sd(&self, data: &[Cow<str>]) -> (f32, f32) {
+        let vals = data
+            .iter()
+            .map(|col| col.parse::<f32>().unwrap_or_default())
+            .collect::<Vec<_>>();
 
-                let mean: f32 = vals.iter().sum::<f32>() / vals.len() as f32;
-                let sd = if vals.len() <= 1 {
-                    0.
-                } else {
-                    (vals.iter().map(|&x| (x - mean).powi(2)).sum::<f32>()
-                        / (vals.len() as f32 - 1.0))
-                        .sqrt()
-                };
+        let mean: f32 = vals.iter().sum::<f32>() / vals.len() as f32;
+        let sd = if vals.len() <= 1 {
+            0.
+        } else {
+            (vals.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / (vals.len() as f32 - 1.0))
+                .sqrt()
+        };
 
-                mean_var.insert(col.index, (mean, sd));
-            }
-        }
-
-        mean_var
+        (mean, sd)
     }
     /// returns values between lower and upper bounds
     /// Uses both train and test data to determine min/max
-    fn get_min_max(&self) -> HashMap<usize, (f32, f32)> {
-        let mut min_max: HashMap<usize, (f32, f32)> = HashMap::default();
-        for col in &self.columns {
-            if let Adjustment::NormaliseMinMax(_, _) = col.adjustment {
-                let vals = self
-                    .data
-                    .iter()
-                    .chain(&self.test_data)
-                    .map(|line| line[col.index].parse::<f32>().unwrap_or_default())
-                    .collect::<Vec<_>>();
+    fn get_min_max(&self, data: &[Cow<str>]) -> (f32, f32) {
+        let vals = data
+            .iter()
+            .map(|col| col.parse::<f32>().unwrap_or_default())
+            .collect::<Vec<_>>();
 
-                let min: f32 = vals
-                    .iter()
-                    .copied()
-                    .min_by(|a, b| a.partial_cmp(b).expect("No NAN"))
-                    .expect("Data is not empty");
-                let max: f32 = vals
-                    .iter()
-                    .copied()
-                    .max_by(|a, b| a.partial_cmp(b).expect("No NAN"))
-                    .expect("Data is not empty");
+        let min: f32 = vals
+            .iter()
+            .copied()
+            .min_by(|a, b| a.partial_cmp(b).expect("No NAN"))
+            .expect("Data is not empty");
+        let max: f32 = vals
+            .iter()
+            .copied()
+            .max_by(|a, b| a.partial_cmp(b).expect("No NAN"))
+            .expect("Data is not empty");
 
-                min_max.insert(col.index, (min, max));
-            }
-        }
-
-        min_max
+        (min, max)
     }
 
     /// Returns index, HashMap of String:correct f32 vec
     /// Uses both train and test data because there may be items in test data which are not in training data
-    fn get_one_hot(&self) -> HashMap<usize, HashMap<String, Vec<f32>>> {
-        let mut onehot: HashMap<usize, HashMap<String, Vec<f32>>> = HashMap::default();
-        for col in &self.columns {
-            if let Adjustment::OneHot = col.adjustment {
-                let uniq = self
-                    .data
-                    .iter()
-                    .chain(&self.test_data)
-                    .map(|line| line[col.index].clone())
-                    .collect::<HashSet<String>>();
-                let mut vals = Vec::from_iter(uniq);
-
-                vals.sort_by_key(|a| a.to_lowercase());
-
-                let mut hash = HashMap::new();
-                for (i, str) in vals.iter().enumerate() {
-                    let mut vec: Vec<f32> = std::iter::repeat(0.).take(vals.len()).collect();
-                    vec[i] = 1.;
-                    hash.insert(str.clone(), vec);
+    fn get_one_hot(&self, data: &[Cow<str>], max: Option<usize>) -> HashMap<String, Vec<f32>> {
+        let mut map = HashMap::new();
+        for w in data {
+            let entry = map.entry(w.to_string()).or_insert_with(|| 0usize);
+            *entry += 1;
+        }
+        let mut ordered = map.into_iter().collect::<Vec<_>>();
+        ordered.sort_by_key(|x| std::cmp::Reverse(x.1));
+        if let Some(max) = max {
+            if max < ordered.len() {
+                ordered = ordered.into_iter().take(max).collect();
+                if !ordered.iter().any(|a| a.0 == "Other") {
+                    ordered.push(("Other".to_string(), 0));
                 }
-                onehot.insert(col.index, hash);
             }
         }
 
-        onehot
+        let mut vals = ordered.into_iter().map(|a| a.0).collect::<Vec<_>>();
+
+        vals.sort_by_key(|a| a.to_lowercase());
+
+        let mut hash = HashMap::new();
+        for (i, str) in vals.iter().enumerate() {
+            let mut vec: Vec<f32> = std::iter::repeat(0.).take(vals.len()).collect();
+            vec[i] = 1.;
+            hash.insert(str.clone(), vec);
+        }
+        hash
     }
 
     fn asserts(&self) {
@@ -563,16 +643,18 @@ impl DatasetBuilder {
     }
 }
 
-#[derive(Debug)]
-struct ColumnStats {
-    pub mean_sd: HashMap<usize, (f32, f32)>,
-    pub min_max: HashMap<usize, (f32, f32)>,
-    pub one_hot: HashMap<usize, HashMap<String, Vec<f32>>>,
+enum ColumnStats {
+    MeanSd(f32, f32),
+    MinMax(f32, f32),
+    OneHot(HashMap<String, Vec<f32>>),
+    None,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{dataset::Adjustment, nn::NN};
+    use std::collections::HashSet;
+
+    use crate::{dataset::Conversion, nn::NN};
 
     use super::Dataset;
 
@@ -582,8 +664,8 @@ mod tests {
         let data = vec![vec!["1", "2", "3"], vec!["4", "5", "6"]];
         let set = Dataset::builder()
             .add_data(&data)
-            .add_input_columns(&[0, 1], Adjustment::F32)
-            .add_target_columns(&[2], Adjustment::F32)
+            .add_input_columns(&[0, 1], Conversion::F32)
+            .add_target_columns(&[2], Conversion::F32)
             .build();
         let (inp, tar) = set.get_data();
         //with this seed, the next shuffle should result in a different selection
@@ -593,17 +675,68 @@ mod tests {
     }
 
     #[test]
-    fn test_allocate_test() {
+    fn test_allocate_correct() {
         fastrand::seed(3);
-        let data = vec![vec![1, 2, 3], vec![4, 5, 6]];
+        let data = vec![
+            vec![1, 1],
+            vec![2, 2],
+            vec![3, 3],
+            vec![4, 4],
+            vec![5, 5],
+            vec![6, 6],
+        ];
         let set = Dataset::builder()
             .add_data(&data)
-            .add_input_columns(&[0, 1], Adjustment::F32)
-            .add_target_columns(&[2], Adjustment::F32)
+            .add_input_columns(&[0], Conversion::F32)
+            .add_target_columns(&[1], Conversion::F32)
             .allocate_to_test_data(0.5)
             .build();
-        assert_eq!(set.data.len(), 1);
-        assert_eq!(set.test_data.len(), 1);
+        assert_eq!(set.data.len(), 3);
+        assert_eq!(set.test_data.len(), 3);
+    }
+    #[test]
+
+    fn test_allocate_test_train_are_different() {
+        fastrand::seed(3);
+        let data = vec![
+            vec![1, 1],
+            vec![2, 2],
+            vec![3, 3],
+            vec![4, 4],
+            vec![5, 5],
+            vec![6, 6],
+        ];
+        let set = Dataset::builder()
+            .add_data(&data)
+            .add_input_columns(&[0], Conversion::F32)
+            .add_target_columns(&[1], Conversion::F32)
+            .allocate_to_test_data(0.5)
+            .build();
+
+        let ins_train = set
+            .get_data()
+            .0
+            .iter()
+            .map(|x| x[0] as u8)
+            .collect::<HashSet<_>>();
+        let ins_test = set
+            .get_test_data()
+            .0
+            .iter()
+            .map(|x| x[0] as u8)
+            .collect::<HashSet<_>>();
+
+        //no items in common
+        //i.e the difference should be equal to the original
+        println!("train {:?}\ntest{:?}", ins_train, ins_test);
+        assert_eq!(
+            ins_train.difference(&ins_test).collect::<Vec<_>>(),
+            ins_train.iter().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            ins_test.difference(&ins_train).collect::<Vec<_>>(),
+            ins_test.iter().collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -616,8 +749,8 @@ mod tests {
         ];
         let set = Dataset::builder()
             .add_data(&data)
-            .add_input_columns(&[0, 1], Adjustment::F32)
-            .add_target_columns(&[2], Adjustment::F32)
+            .add_input_columns(&[0, 1], Conversion::F32)
+            .add_target_columns(&[2], Conversion::F32)
             .allocate_range_to_test_data(1..=1)
             .build();
         assert_eq!(set.data.len(), 2);
@@ -637,8 +770,8 @@ mod tests {
         let data = vec![vec!["1", "2", "3"], vec!["4", "5", "6"]];
         let set = Dataset::builder()
             .add_data(&data)
-            .add_input_columns(&[0, 1], Adjustment::F32)
-            .add_target_columns(&[2], Adjustment::F32)
+            .add_input_columns(&[0, 1], Conversion::F32)
+            .add_target_columns(&[2], Conversion::F32)
             .allocate_to_test_data(0.5)
             .build();
 
@@ -646,7 +779,7 @@ mod tests {
         let data = set.get_data();
         let test = set.get_test_data();
 
-        net.fit(&data.0, &data.1);
+        net.fit_batch(&data.0, &data.1);
         net.forward_error(&data.0[0], &data.1[0]);
         net.forward_error(&test.0[0], &test.1[0]);
     }
@@ -657,8 +790,8 @@ mod tests {
         let set = Dataset::builder()
             .add_data(&data)
             .allocate_to_test_data(0.5)
-            .add_input_columns(&[0, 1], Adjustment::F32)
-            .add_target_columns(&[2], Adjustment::F32)
+            .add_input_columns(&[0, 1], Conversion::F32)
+            .add_target_columns(&[2], Conversion::F32)
             .build();
 
         assert!(set.get_one().0.len() == 2);
@@ -686,7 +819,7 @@ mod tests {
         let data = vec![vec!["1", "2", "3"], vec!["4", "5", "6"]];
         Dataset::builder()
             .add_data(&data)
-            .add_input_columns(&[0], Adjustment::F32)
+            .add_input_columns(&[0], Conversion::F32)
             .build();
     }
 
@@ -695,8 +828,54 @@ mod tests {
         let data = vec![vec!["1", "2", "3"], vec!["4", "5", "6"]];
         Dataset::builder()
             .add_data(&data)
-            .add_input_columns(&[0], Adjustment::F32)
-            .add_target_columns(&[2], Adjustment::F32)
+            .add_input_columns(&[0], Conversion::F32)
+            .add_target_columns(&[2], Conversion::F32)
             .build();
+    }
+
+    #[test]
+    fn onehot() {
+        let data = vec![vec!["dog", "1"], vec!["cat", "2"]];
+        let set = Dataset::builder()
+            .add_data(&data)
+            .add_input_columns(&[0], Conversion::OneHot)
+            .add_target_columns(&[1], Conversion::F32)
+            .build();
+        let data = set.get_data().0;
+        assert!(data.contains(&&vec![1f32, 0.]));
+        assert!(data.contains(&&vec![0f32, 1.]));
+    }
+
+    #[test]
+    fn onehottop() {
+        let data = vec![
+            vec!["dog", "1"],
+            vec!["dog", "1"],
+            vec!["cat", "2"],
+            vec!["cat", "2"],
+            vec!["cat", "2"],
+            vec!["once", "2"],
+        ];
+        let set = Dataset::builder()
+            .add_data(&data)
+            .add_input_columns(&[0], Conversion::OneHotTop(2))
+            .add_target_columns(&[1], Conversion::F32)
+            .build();
+        println!("{:?}", set.target_labels());
+        assert_eq!(set.input_labels(), &["Col0_cat", "Col0_dog", "Col0_Other"])
+    }
+
+    #[test]
+    fn dataset_add_same_column_twice() {
+        let data = vec![vec!["1", "2"], vec!["4", "5"]];
+        let set = Dataset::builder()
+            .add_data(&data)
+            .add_input_columns(&[0], Conversion::F32)
+            .add_input_columns(&[0], Conversion::OneHot)
+            .add_target_columns(&[1], Conversion::F32)
+            .build();
+
+        println!("{:?}", set.get_data());
+        assert_eq!(set.get_data().0[0].len(), 3)
     }
 }

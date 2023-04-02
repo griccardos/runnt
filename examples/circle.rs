@@ -1,5 +1,7 @@
+use std::time::Duration;
+
 use runnt::{
-    dataset::{Adjustment, Dataset},
+    dataset::{Conversion, Dataset},
     nn::{self, NN},
 };
 
@@ -26,18 +28,36 @@ pub fn main() {
         })
         .collect();
     //convert to dataset
-    let data = data
-        .into_iter()
-        .map(|x| x.iter().map(|x| x.to_string()).collect::<Vec<_>>())
-        .collect::<Vec<_>>();
     let set = Dataset::builder()
         .add_data(&data)
-        .allocate_to_test_data(0.1)
-        .add_input_columns_range(0..=1, Adjustment::F32)
-        .add_target_columns(&[2], Adjustment::OneHot)
+        .allocate_to_test_data(0.2)
+        .add_input_columns_range(0..=1, Conversion::F32)
+        .add_target_columns(&[2], Conversion::OneHot)
         .build();
-    let mut net = NN::new(&[set.input_size(), 4, set.target_size()]).with_learning_rate(0.03);
+
+    //create network
+    let mut net = NN::new(&[set.input_size(), 16, set.target_size()]).with_learning_rate(0.03);
 
     //run reporting the mse
-    nn::run_and_report(&set, &mut net, 150, 1, Some(10), true);
+    nn::run_and_report(
+        &set,
+        &mut net,
+        500,
+        1,
+        50,
+        nn::ReportMetric::CorrectClassification,
+    );
+    println!("Generating test data to plot...");
+    std::thread::sleep(Duration::from_secs(2));
+    println!("x,y,tar,predicted");
+    set.get_test_data_zip().iter().for_each(|x| {
+        let pred = net.forward(&x.0);
+        println!(
+            "{},{},{},{}",
+            x.0[0],
+            x.0[1],
+            nn::max_index(x.1),
+            nn::max_index(&pred),
+        );
+    });
 }

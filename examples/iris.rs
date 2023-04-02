@@ -1,7 +1,7 @@
 //Data from UCI Machine Learning Repository [http://archive.ics.uci.edu/ml]. Irvine, CA: University of California, School of Information and Computer Science.
 
 use runnt::{
-    dataset::{Adjustment, Dataset},
+    dataset::{Conversion, Dataset},
     nn::{self, NN},
 };
 
@@ -10,8 +10,8 @@ pub fn main() {
     fastrand::seed(1);
     let set = Dataset::builder()
         .read_csv("examples/data/iris.csv")
-        .add_input_columns(&[0, 1, 2, 3], Adjustment::NormaliseMean)
-        .add_target_columns(&[4], Adjustment::OneHot)
+        .add_input_columns(&[0, 1, 2, 3], Conversion::NormaliseMean)
+        .add_target_columns(&[4], Conversion::OneHot)
         .allocate_to_test_data(0.4)
         .build();
 
@@ -24,7 +24,7 @@ pub fn main() {
     let mut net = NN::new(&[set.input_size(), 32, set.target_size()]).with_learning_rate(0.15);
     for e in 1..=12000 {
         let (ins, tars) = set.get_data();
-        net.fit_batch_size(&ins, &tars, 10);
+        net.fit(&ins, &tars, 10);
 
         if e % 1000 == 0 {
             let err = net.forward_errors(&ins, &tars);

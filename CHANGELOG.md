@@ -1,7 +1,15 @@
-### 0.5.1
+### 0.6.0
 - changed pass in borrowed data to add_data for dataset
 - added 2 moons example
-
+- added `with_softmax_and_crossentropy` this can significantly speed up learning on categorical data
+- fix get_test_data_zip to return test data not train data
+- can now add same column multiple times
+- add ability to apply function to column before conversion
+- added `OneHotTop` to only take top N observations of a categorical feature
+- fixed bug where report was using training data insteead of test data
+- added RSquared report metric
+- added custom report metric
+- renamed `fit` to `fit_batch` and `fit_batch_size` to `fit`
 ### 0.5.0
 - significant speedup with more matrix multiplications
 - add optional accuracy to `run_and_report` for categorisation tasks

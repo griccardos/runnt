@@ -25,7 +25,7 @@ pub fn main() {
         let ins = inp_out.iter().map(|x| &x.0).collect::<Vec<_>>();
         let outs = inp_out.iter().map(|x| &x.1).collect::<Vec<_>>();
 
-        nn.fit(&ins, &outs); //we do batch descent, passing in all observations each time
+        nn.fit_batch(&ins, &outs); //we do batch descent, passing in all observations each time
         let mse: f32 = nn.forward_errors(&ins, &outs);
 
         mse_sum += mse;

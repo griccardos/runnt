@@ -40,7 +40,7 @@ cargo run --release --example mnist -- /tmp/mnist
 
         let inputs = training.iter().map(|x| &x.0).collect::<Vec<_>>();
         let targets = training.iter().map(|x| &x.1).collect::<Vec<_>>();
-        nn.fit_batch_size(&inputs, &targets, 10);
+        nn.fit(&inputs, &targets, 10);
         let (test_acc, test_mse) = get_acc_mse(&nn, &test);
         let (train_acc, train_mse) = get_acc_mse(&nn, &training);
         println!(

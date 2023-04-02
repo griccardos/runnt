@@ -40,6 +40,7 @@ pub struct NN {
     hidden_type: ActivationType,
     output_type: ActivationType,
     regularization: Regularization,
+    use_softmax_crossentropy: bool, //whether we have softmax in last layer, and using crossentropy loss
 }
 
 impl NN {
@@ -88,6 +89,7 @@ impl NN {
             hidden_type: ActivationType::Sigmoid,
             output_type: ActivationType::Linear,
             regularization: Regularization::None,
+            use_softmax_crossentropy: false,
         };
         s.with_initialization(InitializationType::Random)
     }
@@ -115,6 +117,13 @@ impl NN {
         self
     }
 
+    /// Output Layer becomes softmax, and we calculate cross entropy error
+    /// Often speeds up learning in classification
+    pub fn with_softmax_and_crossentropy(mut self) -> Self {
+        self.use_softmax_crossentropy = true;
+        self
+    }
+
     pub fn reset_weights(&mut self, typ: InitializationType) {
         let layers = self.shape.len();
         for l in 0..layers - 1 {
@@ -126,23 +135,20 @@ impl NN {
 
     ///Also known as Stochastic Gradient Descent i.e. Gradient descent with batch size = 1
     pub fn fit_one(&mut self, input: &[f32], targets: &[f32]) {
-        self.fit(&[&input.to_vec()], &[&targets.to_vec()]);
+        self.fit_batch(&[&input.to_vec()], &[&targets.to_vec()]);
     }
 
-    /// Perform mini batch gradient descent on `batch_size`.
-    /// If batch is smaller than data, will perform fit multiple times
-    pub fn fit_batch_size(
-        &mut self,
-        inputs: &[&Vec<f32>],
-        targets: &[&Vec<f32>],
-        batch_size: usize,
-    ) {
+    /// Perform multiple mini batch gradient descents on `batch_size`.  
+    ///
+    /// If `batch_size` is smaller than data, will perform fit multiple times
+    ///
+    /// For example if data has 100 examples and batch size is 20, it will adjust gradients 5 times
+    pub fn fit(&mut self, inputs: &[&Vec<f32>], targets: &[&Vec<f32>], batch_size: usize) {
         //perform fit on chunks of batch size
-        //collect errors
         inputs
             .chunks(batch_size)
             .zip(targets.chunks(batch_size))
-            .for_each(|(inps, outs)| self.fit(inps, outs));
+            .for_each(|(inps, outs)| self.fit_batch(inps, outs));
     }
 
     /// Gradient descent on entire batch <br>
@@ -152,15 +158,19 @@ impl NN {
     /// 3. Backprop to calculate gradient
     /// 4. Regularize
     /// 5. Applies gradients to weights and biases
-    pub fn fit(&mut self, inputs: &[&Vec<f32>], targets: &[&Vec<f32>]) {
+    pub fn fit_batch(&mut self, inputs: &[&Vec<f32>], targets: &[&Vec<f32>]) {
+        assert_eq!(
+            &targets[0].len(),
+            self.shape.last().unwrap(),
+            "Target size does not match network output size"
+        );
+
         let inputs_matrix = self.to_matrix(inputs);
         let targets_matrix = self.to_matrix(targets);
-
         let values = self.internal_forward(&inputs_matrix);
         let outputs = values.last().expect("There should be outputs").clone();
         let loss = self.output_loss(&outputs, &targets_matrix);
         let (mut weights, biases) = self.backwards(values, loss);
-
         self.regularize(&mut weights);
 
         self.apply_gradients(&weights, &biases);
@@ -221,22 +231,37 @@ impl NN {
 
     ///calcs error based on outputs and target
     fn internal_calc_errors(&self, outputs: &Array2<f32>, target: &Array2<f32>) -> Vec<f32> {
-        //E = error or loss
-        //a = forwarded value after activation
-        //t = target value
-        // E = 0.5* (t-a)^2
+        if self.use_softmax_crossentropy {
+            //crossentopy
+            // E= - Sum(Ti Log(Si))
+            //Ti target value
+            //Si softmax value
+            let really_small = 0.0000001; //prevents log(0)
+            let mut err = outputs.mapv(|a| (a + really_small).ln());
+            err *= -1.;
+            err *= target;
+            let sums = err.sum_axis(Axis(1));
+            sums.to_vec()
+        } else {
+            //MSE
+            //E = error or loss
+            //a = forwarded value after activation
+            //t = target value
+            // E = 0.5* (t-a)^2
 
-        let mut diff = target - outputs;
-        diff.mapv_inplace(|x| 0.5 * x.powi(2));
-        //now have a matrix of [example_count x output_size]
-        //we want sum of all output size so we get [example_count x 1]
+            let mut diff = target - outputs;
+            diff.mapv_inplace(|x| 0.5 * x.powi(2));
+            //now have a matrix of [example_count x output_size]
+            //we want sum of all output size so we get [example_count x 1]
 
-        let sums = diff.sum_axis(Axis(1));
-        sums.to_vec()
+            let sums = diff.sum_axis(Axis(1));
+            sums.to_vec()
+        }
     }
 
     /// calc gradient for each example
     fn output_loss(&self, outputs: &Array2<f32>, target: &Array2<f32>) -> Array2<f32> {
+        //MSE LOSS
         //E = error / loss
         //a = value after activation
         //t = target value
@@ -244,7 +269,10 @@ impl NN {
         // E = 0.5* (t-a)^2
         // error gradient: dE/da = -1*2*0.5*(t-a) = -(t-a)=a-t
 
-        //get error gradient
+        //SOFTMAX+CROSS ENTROPY LOSS
+        // softmax and together with crossentropy derivative
+        // conveniently is also output-target (same as mse loss)
+
         outputs - target
     }
 
@@ -252,6 +280,7 @@ impl NN {
     /// each input example is in a different row
     /// each value is in a different column
     /// so for 32 examples in a 10 node layer we have 32x10 matrix
+    /// if softmax, we convert last layer
     fn internal_forward(&self, input: &Array2<f32>) -> Vec<Array2<f32>> {
         assert_eq!(
             input.shape()[1],
@@ -260,7 +289,6 @@ impl NN {
         ); //columns = number of nodes in first layer
 
         let example_count = input.shape()[0];
-
         let mut values = self
             .shape
             .iter()
@@ -273,20 +301,33 @@ impl NN {
         for l in 0..layers - 1 {
             let vals = &values[l];
             let weights = &self.weights[l];
+            let is_last_layer = l == layers - 2;
 
             let bias = &self.bias[l];
 
-            let ltype = if l == layers - 2 {
-                self.output_type
+            let ltype = if is_last_layer {
+                if self.use_softmax_crossentropy {
+                    ActivationType::Linear //we use softmax instead of given output
+                } else {
+                    self.output_type
+                }
             } else {
                 self.hidden_type
             };
 
-            //here bias only is 1xsize, but ndarray adds to each row example
             let mut sum = vals.dot(weights) + bias;
 
             //apply activation
             sum.mapv_inplace(|a| activate(a, ltype));
+
+            //if softmax
+            if is_last_layer && self.use_softmax_crossentropy {
+                sum.mapv_inplace(f32::exp); //calc e^val
+                let sums = sum.sum_axis(Axis(1)); //sum all rows
+                for (ri, mut r) in sum.rows_mut().into_iter().enumerate() {
+                    r.mapv_inplace(|a| a / sums[ri]);
+                }
+            }
 
             values[l + 1] = sum;
         }
@@ -331,17 +372,23 @@ impl NN {
             let next_values = &values[l + 1]; //A
             let this_values = &values[l]; //In
             let this_weights = &self.weights[l]; //W
-            let ltype = if l == layers - 2 {
-                self.output_type
+            let is_last_layer = l == layers - 2;
+            let ltype = if is_last_layer {
+                if self.use_softmax_crossentropy {
+                    //if we use softmax, we use linear because we dont want to work out activation derivative for output,
+                    //we want it to be 1 because included in the loss derivative for softmax+crossentropy is the softmax derivative,
+                    ActivationType::Linear
+                } else {
+                    self.output_type
+                }
             } else {
                 self.hidden_type
             };
 
             let da_dz = next_values.map(|&a| activate_der(a, ltype)); //dA/dZ
-
             let de_dz = &next_layer_error_deriv * &da_dz; //dE/dA * dA/dZ = dE/dZ
 
-            //here error_grad_bias is numberexamples x size. But we only keep the sum
+            //here error_grad_bias is numberexamples x size. But we only keep the sum so make 1xsize
             let ones: Array2<f32> = Array2::ones((1, example_count));
             let error_grad_bias = ones.dot(&de_dz); //dE/dZ * 1
 
@@ -416,6 +463,10 @@ impl NN {
         vec.push(format!("output_type={}", self.output_type));
         vec.push(format!("regularization={}", self.regularization));
         vec.push(format!(
+            "softmax_crossentropy={}",
+            self.use_softmax_crossentropy
+        ));
+        vec.push(format!(
             "shape={}",
             self.shape
                 .iter()
@@ -472,6 +523,7 @@ impl NN {
             .collect();
 
         let mut lr = 0.01f32;
+        let mut softmax_crossentropy = false;
         let mut ht = ActivationType::Sigmoid;
         let mut ot = ActivationType::Linear;
         let mut reg = Regularization::None;
@@ -487,6 +539,8 @@ impl NN {
                 ot = ActivationType::from_str(&line[1]).unwrap_or(ActivationType::Linear);
             } else if line[0] == "regularization" {
                 reg = Regularization::from_str(&line[1]);
+            } else if line[0] == "softmax_crossentropy" {
+                softmax_crossentropy = line[1].parse::<bool>().unwrap_or_default();
             } else if line[0] == "weight" {
                 let ww: Vec<Vec<f32>> = line[1]
                     .split(';')
@@ -535,6 +589,7 @@ impl NN {
             .with_regularization(reg)
             .with_learning_rate(lr);
 
+        s.use_softmax_crossentropy = softmax_crossentropy;
         s.weights = weights;
         s.bias = biases;
 
@@ -620,7 +675,7 @@ impl Display for NN {
 /// whereas the predicted may not be exactly one
 /// So instead we compare the index of the maximum value, to determine equality
 /// # Panics
-/// If target and predicted lengths differ
+/// If target and predicted lengths differ or if zero length
 pub fn max_index_equal(target: &[f32], predicted: &[f32]) -> bool {
     assert_eq!(
         target.len(),
@@ -633,7 +688,8 @@ pub fn max_index_equal(target: &[f32], predicted: &[f32]) -> bool {
     pred == tar
 }
 
-/// Returns the index of the maximum value, panics if empty
+/// Returns the index of the maximum value, panics if empty vec passed in
+/// also known as argmax
 pub fn max_index(vec: &[f32]) -> usize {
     vec.iter()
         .enumerate()
@@ -642,40 +698,80 @@ pub fn max_index(vec: &[f32]) -> usize {
         .0
 }
 
+pub struct TargetPredicted {
+    pub target: f32,
+    pub predicted: f32,
+}
+pub type CustomMetric = fn(Vec<Vec<TargetPredicted>>) -> String;
+///Reporting metric
+pub enum ReportMetric {
+    ///No metric reported
+    None,
+    ///Assumes target is one hot encoding, chooses highest category,
+    /// and calculates the % that are correctly classified
+    CorrectClassification,
+    ///Assumes target is regression, calculates 1-SSR/SST
+    /// Assumes target Vec size is 1, else it will calculate the average RSquared over each output
+    RSquared,
+    ///Custom accuracy function.
+    /// We pass in a Vec of examples.<br>
+    /// For each example, there is a Vec of (Target,Predicted)<br>
+    /// We Return a String representing the metric e.g. accuracy <br>
+    /// Example: <br>
+    /// We want to count the %of examples that is within 1% of target.  
+    /// If predicted is within 1% of target, then it is correct, else it is incorrect
+    ///```rust
+    /// let fun = |ex: Vec<Vec<runnt::nn::TargetPredicted>>| {
+    ///     let mut count = 0;
+    ///     for eg in &ex {
+    ///         if (eg[0].target - eg[0].predicted).abs() / eg[0].target < 0.01 {
+    ///             count += 1
+    ///         }
+    ///     }
+    ///     format!("{}%", count as f32 / ex.len() as f32 * 100.)
+    ///};
+    ///```
+    Custom(CustomMetric),
+}
+
 /// Basic Runner that loops through:
 /// 1. getting shuffled data and test data from Dataset
 /// 2. fitting data with batch size
-/// 3. reporting train and test mse
-/// 4. (optionally) report accuracy (assumes target and output is one hot encoded, and chooses highest value)
+/// 3. reporting train and test error
+/// 4. Report metric applied to both train and test data
 /// Currently a convenience function. May be removed in the future.
 pub fn run_and_report(
     set: &Dataset,
     net: &mut NN,
     epochs: usize,
     batch_size: usize,
-    report_epoch: Option<usize>,
-    report_accuracy: bool,
+    report_epoch: usize,
+    metric: ReportMetric,
 ) {
     let start = Instant::now();
-    let acc = if report_accuracy {
-        " train_acc test_acc"
-    } else {
-        ""
+    let acc = match metric {
+        ReportMetric::None => "",
+        ReportMetric::CorrectClassification => " train_acc test_acc",
+        ReportMetric::RSquared => " train_R² test R²",
+        ReportMetric::Custom(_) => " train_acc test_acc",
     };
-    println!("epoch train_mse test_mse{acc} duration(s)");
+    println!("epoch train_error test_error{acc} duration(s)");
     for e in 1..=epochs {
         let (inp, tar) = set.get_data();
-        net.fit_batch_size(&inp, &tar, batch_size);
-        if let Some(re) = report_epoch {
-            if re > 0 && e % re == 0 {
-                //get mse
-                let train_err = net.forward_errors(&inp, &tar);
-                let (inp_test, tar_test) = set.get_test_data();
-                let test_err = net.forward_errors(&inp_test, &tar_test);
+        net.fit(&inp, &tar, batch_size);
 
-                //get accuracy
-                let mut acc = "".to_string();
-                if report_accuracy {
+        if report_epoch > 0 && e % report_epoch == 0 {
+            //get error
+            let train_err = net.forward_errors(&inp, &tar);
+            let (inp_test, tar_test) = set.get_test_data();
+            let test_err = net.forward_errors(&inp_test, &tar_test);
+
+            //get accuracy
+            let mut acc = "".to_string();
+
+            match metric {
+                ReportMetric::None => {}
+                ReportMetric::CorrectClassification => {
                     let mut train_count = 0;
                     for (inp, tar) in inp.iter().zip(tar) {
                         let pred = net.forward(inp);
@@ -693,234 +789,77 @@ pub fn run_and_report(
                     }
                     let train_acc = train_count as f32 / inp.len() as f32 * 100.;
                     let test_acc = test_count as f32 / inp_test.len() as f32 * 100.;
-                    acc = format!(" {train_acc:.1}% {test_acc:.1}%");
+                    acc = format!(" {train_acc:.2}% {test_acc:.2}%");
                 }
+                ReportMetric::RSquared => {
+                    // Calc 1 - SSR/SST = 1 - Σ(y-ŷ)/Σ(y-ȳ)
+                    //get ȳ
+                    //Rsquared is usually just one regression output, however if there are multiple,
+                    //we calculated  the r2 for each output
 
-                println!(
-                    "{e} {train_err} {test_err}{acc} {:.1}",
-                    start.elapsed().as_secs_f32()
-                );
+                    //TRAIN,TEST
+                    let data = [(inp, tar), (inp_test, tar_test)];
+                    let mut r2 = vec![];
+                    for (inp, tar) in data {
+                        let pred: Vec<Vec<f32>> = inp.iter().map(|inp| net.forward(inp)).collect();
+                        let mut r2s = vec![];
+                        for i in 0..tar[0].len() {
+                            let tar = tar.iter().map(|x| x[i]).collect::<Vec<_>>();
+                            let pred = pred.iter().map(|x| x[i]).collect::<Vec<_>>();
+                            let avg: f32 = tar.iter().sum::<f32>() / tar.len() as f32;
+                            let sst = tar.iter().map(|x| (x - avg).powi(2)).sum::<f32>();
+                            let ssr = tar
+                                .into_iter()
+                                .zip(pred)
+                                .map(|(tar, pred)| (tar - pred).powi(2))
+                                .sum::<f32>();
+                            let r2 = 1. - ssr / sst;
+                            r2s.push(r2);
+                        }
+                        r2.push(r2s.iter().sum::<f32>() / r2s.len() as f32);
+                    }
+                    acc = format!(" {} {}", r2[0], r2[1]);
+                }
+                ReportMetric::Custom(fun) => {
+                    let mut trains = vec![];
+                    for (inp, tar) in inp.iter().zip(tar) {
+                        let pred = net.forward(inp);
+                        trains.push(
+                            tar.iter()
+                                .zip(pred)
+                                .map(|a| TargetPredicted {
+                                    target: *a.0,
+                                    predicted: a.1,
+                                })
+                                .collect::<Vec<_>>(),
+                        );
+                    }
+
+                    let mut tests = vec![];
+                    for (inp, tar) in inp_test.iter().zip(tar_test) {
+                        let pred = net.forward(inp);
+                        tests.push(
+                            tar.iter()
+                                .zip(pred)
+                                .map(|a| TargetPredicted {
+                                    target: *a.0,
+                                    predicted: a.1,
+                                })
+                                .collect::<Vec<_>>(),
+                        );
+                    }
+                    acc = format!(" {} {}", fun(trains), fun(tests));
+                }
             }
+
+            println!(
+                "{e} {train_err} {test_err}{acc} {:.1}",
+                start.elapsed().as_secs_f32()
+            );
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::VecDeque;
-
-    use ndarray::arr2;
-    use tempfile::NamedTempFile;
-
-    use crate::activation::ActivationType;
-    use crate::initialization::InitializationType;
-    use crate::nn::NN;
-    use crate::regularization::Regularization;
-
-    #[test]
-    /// Test xor nn against known outputs
-    fn test_xor() {
-        //setup initial  weights
-        let mut nn = NN::new(&[2, 2, 1])
-            .with_learning_rate(0.5)
-            .with_hidden_type(ActivationType::Sigmoid)
-            .with_output_type(ActivationType::Sigmoid);
-
-        nn.weights = [arr2(&[[0.15, 0.2], [0.25, 0.3]]), arr2(&[[0.4], [0.45]])].to_vec();
-        nn.bias = [arr2(&[[0.35, 0.35]]), arr2(&[[0.6]])].to_vec();
-
-        //check forward
-        let vals = nn.forward(&[0., 0.]);
-        assert_eq!(vals, [0.750002384]);
-
-        //check first 4
-        let inputs = [[0., 0.], [0., 1.], [1., 0.], [1., 1.]];
-        let outputs = [[0.], [1.], [1.], [0.]];
-
-        let known_errors = [0.2812518, 0.034677744, 0.033219155, 0.28904837];
-        let known_biases = [
-            //1
-            [arr2(&[[0.35, 0.35]]), arr2(&[[0.6]])].to_vec(),
-            //2
-            [arr2(&[[0.343179762, 0.342327237]]), arr2(&[[0.529687762]])].to_vec(),
-            //3
-            [arr2(&[[0.3452806, 0.34468588]]), arr2(&[[0.555233]])].to_vec(),
-            //4
-            [arr2(&[[0.3474572, 0.34712338]]), arr2(&[[0.5798897]])].to_vec(),
-        ]
-        .to_vec();
-
-        for i in 0..4 {
-            //check error
-            assert_eq!(nn.bias, known_biases[i]);
-            println!("{i}: biases ok");
-            let error = nn.calc_error(&nn.forward(&inputs[i]), &outputs[i]);
-            nn.fit_one(&inputs[i], &outputs[i]);
-            assert_eq!(error, known_errors[i]);
-            println!("{i}: errors ok");
-        }
-    }
-
-    #[test]
-    fn xor_sgd() {
-        fastrand::seed(1);
-        let mut nn = crate::nn::NN::new(&[2, 8, 1])
-            .with_learning_rate(0.2)
-            .with_hidden_type(ActivationType::Sigmoid)
-            .with_output_type(ActivationType::Sigmoid);
-
-        let mut inp_out = [
-            ([0., 0.], [0.1]),
-            ([0., 1.], [1.]),
-            ([1., 0.], [1.]),
-            ([1., 1.], [0.]),
-        ];
-
-        let mut completed_steps = vec![];
-
-        //run a few times, and get average completion epoch
-        for _ in 0..5 {
-            let mut results: VecDeque<f32> = VecDeque::new();
-
-            results.clear();
-            nn.reset_weights(InitializationType::Random);
-            for steps in 0..20_000 {
-                fastrand::shuffle(&mut inp_out);
-                nn.fit_one(&inp_out[0].0, &inp_out[0].1);
-                let err = nn.forward_error(&inp_out[0].0, &inp_out[0].1);
-
-                results.push_back(err);
-                if results.len() > 100 {
-                    results.pop_front();
-                    if results.iter().sum::<f32>() / 100. < 0.02 {
-                        completed_steps.push(steps);
-                        break;
-                    }
-                }
-            }
-        }
-
-        let avg = completed_steps.iter().sum::<usize>() / completed_steps.len();
-
-        println!("len:{} avg:{avg}", completed_steps.len());
-        assert!(completed_steps.len() == 5);
-        assert!(avg < 8000);
-    }
-
-    #[test]
-    fn xor_gd() {
-        //do mini batch gradient descent.
-        //we take a few at a time
-        fastrand::seed(1);
-        let mut nn = crate::nn::NN::new(&[2, 8, 1])
-            .with_learning_rate(0.8)
-            .with_hidden_type(ActivationType::Sigmoid)
-            .with_output_type(ActivationType::Sigmoid);
-
-        let mut inp_out = [
-            (vec![0f32, 0.], vec![0.1]),
-            (vec![0., 1.], vec![1.]),
-            (vec![1., 0.], vec![1.]),
-            (vec![1., 1.], vec![0.]),
-        ];
-
-        let mut completed_steps = vec![];
-
-        //run a few times, and get average completion epoch
-        for _ in 0..5 {
-            let mut results: VecDeque<f32> = VecDeque::new();
-
-            results.clear();
-            nn.reset_weights(InitializationType::Random);
-            for steps in 0..20_000 {
-                fastrand::shuffle(&mut inp_out);
-                let ins = vec![&inp_out[0].0, &inp_out[1].0];
-                let outs = vec![&inp_out[0].1, &inp_out[1].1];
-
-                nn.fit(&ins, &outs);
-
-                let err: f32 = nn.forward_errors(&ins, &outs);
-
-                results.push_back(err / ins.len() as f32);
-                if results.len() > 100 {
-                    results.pop_front();
-                    if results.iter().sum::<f32>() / 100. < 0.02 {
-                        completed_steps.push(steps);
-                        break;
-                    }
-                }
-            }
-        }
-
-        let avg = completed_steps.iter().sum::<usize>() / completed_steps.len();
-
-        println!("len:{} avg:{avg}", completed_steps.len());
-
-        assert!(completed_steps.len() == 5);
-        assert!(avg < 2000);
-    }
-    #[test]
-    ///use this in documentation
-    fn readme() {
-        let inputs = [[0., 0.], [0., 1.], [1., 0.], [1., 1.]];
-        let outputs = [[0.], [1.], [1.], [0.]];
-
-        let mut nn = NN::new(&[2, 8, 1])
-            .with_learning_rate(0.2)
-            .with_hidden_type(ActivationType::Tanh)
-            .with_output_type(ActivationType::Linear);
-
-        for i in 0..5000 {
-            nn.fit_one(&inputs[i % 4], &outputs[i % 4]);
-        }
-        assert_eq!(nn.forward(&[0., 0.]).first().unwrap().round(), 0.);
-        assert_eq!(nn.forward(&[0., 1.]).first().unwrap().round(), 1.);
-        assert_eq!(nn.forward(&[1., 0.]).first().unwrap().round(), 1.);
-        assert_eq!(nn.forward(&[1., 1.]).first().unwrap().round(), 0.);
-    }
-    #[test]
-    fn test_save_load() {
-        let nn = NN::new(&[10, 100, 10])
-            .with_learning_rate(0.5)
-            .with_regularization(Regularization::L1L2(0.1, 0.2))
-            .with_hidden_type(ActivationType::Tanh)
-            .with_output_type(ActivationType::Relu);
-
-        let input = [1., 2., 3., 4., 5., 6., 7., 8., 9., 10.];
-        let result1 = nn.forward(&input);
-        let temp = NamedTempFile::new().unwrap();
-        let path = temp.path();
-
-        //test looks the same
-        let orig = nn.get_weights();
-        let orig_shape = nn.get_shape();
-        println!("shape:{orig_shape:?} weights:{orig:?}");
-        nn.save(&path);
-        let nn2 = NN::load(path);
-        let new = nn2.get_weights();
-        let new_shape = nn2.get_shape();
-        println!("shape:{new_shape:?} weights:{new:?}");
-        assert_eq!(orig_shape, new_shape);
-        assert_eq!(orig, new);
-
-        //test result the same
-        let result2 = nn2.forward(&input);
-        assert_eq!(result1, result2);
-    }
-
-    #[test]
-    fn test_get_set_weights() {
-        //the result before and after should be the same if set with the same weights
-        let mut nn = NN::new(&[12, 12, 12]);
-
-        let test = [1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12.];
-        let res1 = nn.forward(&test);
-        let old = nn.get_weights();
-        nn.set_weights(&old);
-
-        let res2 = nn.forward(&test);
-        println!("before {res1:?} after: {res2:?}");
-
-        assert_eq!(res1, res2);
-    }
-}
+#[path = "tests.rs"]
+mod tests;

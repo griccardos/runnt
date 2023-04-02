@@ -74,7 +74,7 @@ fn matrix_batch_iterations_per_second(b: &mut Bencher) {
     let inputs = inputs.iter().map(|x| x).collect::<Vec<_>>();
     let targets = targets.iter().map(|x| x).collect::<Vec<_>>();
 
-    b.iter(|| nn.fit_batch_size(&inputs, &targets, 100));
+    b.iter(|| nn.fit(&inputs, &targets, 100));
 }
 
 fn batch_forward_error_per_second(b: &mut Bencher) {
