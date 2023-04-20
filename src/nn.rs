@@ -288,39 +288,18 @@ impl NN {
             "Input size does not equal first layer size"
         ); //columns = number of nodes in first layer
 
-        let example_count = input.shape()[0];
-        let mut values = self
-            .shape
-            .iter()
-            .map(|size| Array::zeros([example_count, *size]))
-            .collect::<Vec<_>>();
+        let mut values = Vec::new();
+        values.push(input.clone());
 
-        values[0] = input.clone();
-
-        let layers = self.shape.len();
-        for l in 0..layers - 1 {
-            let vals = &values[l];
-            let weights = &self.weights[l];
-            let is_last_layer = l == layers - 2;
-
-            let bias = &self.bias[l];
-
-            let ltype = if is_last_layer {
-                if self.use_softmax_crossentropy {
-                    ActivationType::Linear //we use softmax instead of given output
-                } else {
-                    self.output_type
-                }
-            } else {
-                self.hidden_type
-            };
-
-            let mut sum = vals.dot(weights) + bias;
+        for l in 0..self.weights.len() {
+            let mut sum = &values[l].dot(&self.weights[l]) + &self.bias[l];
 
             //apply activation
+            let ltype = self.get_layer_type(l);
             sum.mapv_inplace(|a| activate(a, ltype));
 
             //if softmax
+            let is_last_layer = l == self.weights.len() - 1;
             if is_last_layer && self.use_softmax_crossentropy {
                 sum.mapv_inplace(f32::exp); //calc e^val
                 let sums = sum.sum_axis(Axis(1)); //sum all rows
@@ -329,10 +308,20 @@ impl NN {
                 }
             }
 
-            values[l + 1] = sum;
+            values.push(sum);
         }
 
         values
+    }
+
+    fn get_layer_type(&self, layer: usize) -> ActivationType {
+        let is_last_layer = layer == self.weights.len() - 1;
+        let ltype = match (is_last_layer, self.use_softmax_crossentropy) {
+            (false, _) => self.hidden_type,
+            (true, false) => self.output_type,
+            (true, true) => ActivationType::Linear, //we use softmax instead,
+        };
+        ltype
     }
 
     /// Calculates the gradients for all layers.
@@ -372,18 +361,7 @@ impl NN {
             let next_values = &values[l + 1]; //A
             let this_values = &values[l]; //In
             let this_weights = &self.weights[l]; //W
-            let is_last_layer = l == layers - 2;
-            let ltype = if is_last_layer {
-                if self.use_softmax_crossentropy {
-                    //if we use softmax, we use linear because we dont want to work out activation derivative for output,
-                    //we want it to be 1 because included in the loss derivative for softmax+crossentropy is the softmax derivative,
-                    ActivationType::Linear
-                } else {
-                    self.output_type
-                }
-            } else {
-                self.hidden_type
-            };
+            let ltype = self.get_layer_type(l);
 
             let da_dz = next_values.map(|&a| activate_der(a, ltype)); //dA/dZ
             let de_dz = &next_layer_error_deriv * &da_dz; //dE/dA * dA/dZ = dE/dZ

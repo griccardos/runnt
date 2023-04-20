@@ -180,7 +180,11 @@ fn readme() {
     let mut net = NN::new(&[set.input_size(), 32, set.target_size()]).with_learning_rate(0.15);
     run_and_report(&set, &mut net, 100, 8, 10, ReportMetric::CorrectClassification);
     }
-    //
+
+    //run only if have diamonds dataset
+    if !Path::new(r"/temp/diamonds.csv").exists(){
+        return;
+    }
     use crate::dataset::*;
     use crate::nn::*;
 
