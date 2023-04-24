@@ -16,18 +16,19 @@ pub fn activate(val: f32, ltype: ActivationType) -> f32 {
         ActivationType::Tanh => val.tanh(),
     }
 }
-pub fn activate_der(val: f32, ltype: ActivationType) -> f32 {
+///Note this is on the activated value, so we dont need to activate it again
+pub fn activate_der(activated_value: f32, ltype: ActivationType) -> f32 {
     match ltype {
         ActivationType::Relu => {
-            if val > 0. {
+            if activated_value > 0. {
                 1.
             } else {
                 0.
             }
         }
-        ActivationType::Sigmoid => val * (1. - val),
+        ActivationType::Sigmoid => activated_value * (1. - activated_value),
         ActivationType::Linear => 1.,
-        ActivationType::Tanh => 1. - val * val, //1-tanh(x)^2 (since we have val=tanh(x), we just use val)
+        ActivationType::Tanh => 1. - activated_value * activated_value, //1-tanh(x)^2 (since we have val=tanh(x), we just use val)
     }
 }
 
