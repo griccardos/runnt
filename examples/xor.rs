@@ -11,7 +11,7 @@ pub fn main() {
         .with_output_type(ActivationType::Sigmoid); //we expect it to be 0 or 1 so sigmoid is ok
 
     let mut inp_out = [
-        (vec![0., 0.], vec![0.1]),
+        (vec![0., 0.], vec![0.]),
         (vec![0., 1.], vec![1.]),
         (vec![1., 0.], vec![1.]),
         (vec![1., 1.], vec![0.]),
