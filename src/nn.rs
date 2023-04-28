@@ -142,6 +142,10 @@ impl NN {
     ///
     /// If `batch_size` is smaller than data, will perform fit multiple times
     ///
+    /// If `batch_size` == number of examples, will do one gradient descent. (same as `fit_batch`)
+    ///
+    /// If `batch_size` == 1, will perform gradient descent for each example. (same as `fit_one`)
+    ///
     /// For example if data has 100 examples and batch size is 20, it will adjust gradients 5 times
     pub fn fit(&mut self, inputs: &[&Vec<f32>], targets: &[&Vec<f32>], batch_size: usize) {
         //perform fit on chunks of batch size
@@ -719,7 +723,6 @@ pub enum ReportMetric {
 /// 2. fitting data with batch size
 /// 3. reporting train and test error
 /// 4. Report metric applied to both train and test data
-/// Currently a convenience function. May be removed in the future.
 pub fn run_and_report(
     set: &Dataset,
     net: &mut NN,
