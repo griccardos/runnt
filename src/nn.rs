@@ -206,6 +206,8 @@ impl NN {
 
     /// Forward batch, and get mean error
     pub fn forward_errors(&self, inputs: &[&Vec<f32>], targets: &[&Vec<f32>]) -> f32 {
+        assert!(!inputs.is_empty(), "No inputs");
+        assert!(!targets.is_empty(), "No targets");
         let inputs = self.to_matrix(inputs);
         let targets = self.to_matrix(targets);
         self.internal_forward_errors(&inputs, &targets)
@@ -742,93 +744,21 @@ pub fn run_and_report(
             //get error
             let train_err = net.forward_errors(&inp, &tar);
             let (inp_test, tar_test) = set.get_test_data();
-            let test_err = net.forward_errors(&inp_test, &tar_test);
+            let test_err = if inp_test.is_empty() {
+                0.
+            } else {
+                net.forward_errors(&inp_test, &tar_test)
+            };
 
             //get accuracy
-            let mut acc = "".to_string();
+            let train_acc = get_report(&metric, net, &inp, &tar);
+            let test_acc = if inp_test.is_empty() {
+                format!("")
+            } else {
+                get_report(&metric, net, &inp_test, &tar_test)
+            };
 
-            match metric {
-                ReportMetric::None => {}
-                ReportMetric::CorrectClassification => {
-                    let mut train_count = 0;
-                    for (inp, tar) in inp.iter().zip(tar) {
-                        let pred = net.forward(inp);
-                        if max_index_equal(tar, &pred) {
-                            train_count += 1;
-                        }
-                    }
-
-                    let mut test_count = 0;
-                    for (inp, tar) in inp_test.iter().zip(tar_test) {
-                        let pred = net.forward(inp);
-                        if max_index_equal(tar, &pred) {
-                            test_count += 1;
-                        }
-                    }
-                    let train_acc = train_count as f32 / inp.len() as f32 * 100.;
-                    let test_acc = test_count as f32 / inp_test.len() as f32 * 100.;
-                    acc = format!(" {train_acc:.2}% {test_acc:.2}%");
-                }
-                ReportMetric::RSquared => {
-                    // Calc 1 - SSR/SST = 1 - Σ(y-ŷ)/Σ(y-ȳ)
-                    //get ȳ
-                    //Rsquared is usually just one regression output, however if there are multiple,
-                    //we calculated  the r2 for each output
-
-                    //TRAIN,TEST
-                    let data = [(inp, tar), (inp_test, tar_test)];
-                    let mut r2 = vec![];
-                    for (inp, tar) in data {
-                        let pred: Vec<Vec<f32>> = inp.iter().map(|inp| net.forward(inp)).collect();
-                        let mut r2s = vec![];
-                        for i in 0..tar[0].len() {
-                            let tar = tar.iter().map(|x| x[i]).collect::<Vec<_>>();
-                            let pred = pred.iter().map(|x| x[i]).collect::<Vec<_>>();
-                            let avg: f32 = tar.iter().sum::<f32>() / tar.len() as f32;
-                            let sst = tar.iter().map(|x| (x - avg).powi(2)).sum::<f32>();
-                            let ssr = tar
-                                .into_iter()
-                                .zip(pred)
-                                .map(|(tar, pred)| (tar - pred).powi(2))
-                                .sum::<f32>();
-                            let r2 = 1. - ssr / sst;
-                            r2s.push(r2);
-                        }
-                        r2.push(r2s.iter().sum::<f32>() / r2s.len() as f32);
-                    }
-                    acc = format!(" {} {}", r2[0], r2[1]);
-                }
-                ReportMetric::Custom(fun) => {
-                    let mut trains = vec![];
-                    for (inp, tar) in inp.iter().zip(tar) {
-                        let pred = net.forward(inp);
-                        trains.push(
-                            tar.iter()
-                                .zip(pred)
-                                .map(|a| TargetPredicted {
-                                    target: *a.0,
-                                    predicted: a.1,
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                    }
-
-                    let mut tests = vec![];
-                    for (inp, tar) in inp_test.iter().zip(tar_test) {
-                        let pred = net.forward(inp);
-                        tests.push(
-                            tar.iter()
-                                .zip(pred)
-                                .map(|a| TargetPredicted {
-                                    target: *a.0,
-                                    predicted: a.1,
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                    }
-                    acc = format!(" {} {}", fun(trains), fun(tests));
-                }
-            }
+            let acc = format!(" {train_acc} {test_acc}");
 
             println!(
                 "{e} {train_err} {test_err}{acc} {:.1}",
@@ -836,6 +766,75 @@ pub fn run_and_report(
             );
         }
     }
+}
+
+pub fn get_report(
+    metric: &ReportMetric,
+    net: &mut NN,
+    inp: &Vec<&Vec<f32>>,
+    tar: &Vec<&Vec<f32>>,
+) -> String {
+    let mut acc_string = "".to_string();
+
+    match *metric {
+        ReportMetric::None => {}
+        ReportMetric::CorrectClassification => {
+            let mut count = 0;
+            for (inp, tar) in inp.iter().zip(tar) {
+                let pred = net.forward(inp);
+                if max_index_equal(tar, &pred) {
+                    count += 1;
+                }
+            }
+
+            let t_acc = count as f32 / inp.len() as f32 * 100.;
+            acc_string = format!("{t_acc:.2}%");
+        }
+        ReportMetric::RSquared => {
+            // Calc 1 - SSR/SST = 1 - Σ(y-ŷ)/Σ(y-ȳ)
+            //get ȳ
+            //Rsquared is usually just one regression output, however if there are multiple,
+            //we calculated  the r2 for each output
+
+            //TRAIN,TEST
+            let pred: Vec<Vec<f32>> = inp.iter().map(|inp| net.forward(inp)).collect();
+            let mut r2s = vec![];
+            for i in 0..tar[0].len() {
+                let tar = tar.iter().map(|x| x[i]).collect::<Vec<_>>();
+                let pred = pred.iter().map(|x| x[i]).collect::<Vec<_>>();
+                let avg: f32 = tar.iter().sum::<f32>() / tar.len() as f32;
+                let sst = tar.iter().map(|x| (x - avg).powi(2)).sum::<f32>();
+                let ssr = tar
+                    .into_iter()
+                    .zip(pred)
+                    .map(|(tar, pred)| (tar - pred).powi(2))
+                    .sum::<f32>();
+                let r2 = 1. - ssr / sst;
+                r2s.push(r2);
+            }
+            let r2 = r2s.iter().sum::<f32>() / r2s.len() as f32;
+
+            acc_string = format!("{}", r2);
+        }
+        ReportMetric::Custom(fun) => {
+            let mut trains = vec![];
+            for (inp, tar) in inp.iter().zip(tar) {
+                let pred = net.forward(inp);
+                trains.push(
+                    tar.iter()
+                        .zip(pred)
+                        .map(|a| TargetPredicted {
+                            target: *a.0,
+                            predicted: a.1,
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }
+
+            acc_string = format!("{}", fun(trains));
+        }
+    }
+    acc_string
 }
 
 #[cfg(test)]

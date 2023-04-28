@@ -2,7 +2,7 @@
 
 use runnt::{
     dataset::{Conversion, Dataset},
-    nn::{self, NN},
+    nn::{get_report, ReportMetric, NN},
 };
 
 // Example of how to use `Dataset` and classification
@@ -32,22 +32,16 @@ pub fn main() {
             let (test_ins, test_tars) = set.get_test_data();
             let test_err = net.forward_errors(&test_ins, &test_tars);
 
-            let correct = acc(&net, &ins, &tars);
-            let test_correct = acc(&net, &test_ins, &test_tars);
+            let correct = get_report(&ReportMetric::CorrectClassification, &mut net, &ins, &tars);
 
-            println!("{e} train mse: {err} test mse: {test_err} train correct:{correct}% test correct:{test_correct}%");
+            let test_correct = get_report(
+                &ReportMetric::CorrectClassification,
+                &mut net,
+                &test_ins,
+                &test_tars,
+            );
+
+            println!("{e} train mse: {err} test mse: {test_err} train correct:{correct} test correct:{test_correct}");
         }
     }
-}
-
-fn acc(net: &NN, ins: &Vec<&Vec<f32>>, tars: &Vec<&Vec<f32>>) -> f32 {
-    let mut correct = 0;
-    for (ins, tars) in ins.iter().zip(tars) {
-        let pred = net.forward(&ins);
-        if nn::max_index_equal(&tars, &pred) {
-            correct += 1;
-        }
-    }
-    let correct = 100. * correct as f32 / ins.len() as f32;
-    correct
 }

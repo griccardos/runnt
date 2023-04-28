@@ -44,7 +44,7 @@ cargo run --release --example mnist -- /tmp/mnist
         let (test_acc, test_mse) = get_acc_mse(&nn, &test);
         let (train_acc, train_mse) = get_acc_mse(&nn, &training);
         println!(
-            "epoch {epoch} train mse:{} test mse:{} train acc:{}%  test acc:{}% in {:.2}s",
+            "epoch {epoch} train mse:{} test mse:{} train acc:{}% test acc:{}% in {:.2}s",
             train_mse,
             test_mse,
             train_acc * 100.,
