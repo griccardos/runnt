@@ -42,7 +42,7 @@ All you need is NN and data
 ```
 ### Simple example with Dataset and reporting
 `Dataset` makes loading and transforming data a bit easier  
-`run_and_report` makes running epochs and reporting easy  
+`train` makes running epochs and reporting easy  
 Complete neural net with reporting in < 10 lines   
 ```rust
 let set = Dataset::builder()
@@ -53,7 +53,7 @@ let set = Dataset::builder()
     .build();
 
     let mut net = NN::new(&[set.input_size(), 32, set.target_size()]).with_learning_rate(0.15);
-    run_and_report(&set, &mut net, 1000, 8, 100, ReportAccuracy::CorrectClassification);
+    net.train(&set, 1000, 8, 100, ReportAccuracy::CorrectClassification);
 ```
 
 ### With Dataset and reporting and save:
@@ -76,6 +76,6 @@ let set = Dataset::builder()
         NN::new(&[set.input_size(), 32, set.target_size()])
     };
     //run for 100 epochs, with batch size 32 and report every 10 epochs
-    run_and_report(&set, &mut net, 100, 32, 10, ReportAccuracy::RSquared);
+    net.train(&set,  100, 32, 10, ReportAccuracy::RSquared);
     net.save(save_path);
 ```

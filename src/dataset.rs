@@ -212,7 +212,7 @@ impl DatasetBuilder {
     pub fn add_data<T: ToString>(mut self, data: &[Vec<T>]) -> Self {
         self.data.extend(
             data.iter()
-                .map(|x| x.iter().map(|y| y.to_string()).collect()),
+                .map(|x| x.iter().map(ToString::to_string).collect()),
         );
         self
     }
@@ -221,7 +221,7 @@ impl DatasetBuilder {
         self.test_data.extend(
             test_data
                 .iter()
-                .map(|x| x.iter().map(|y| y.to_string()).collect()),
+                .map(|x| x.iter().map(ToString::to_string).collect()),
         );
         self
     }
@@ -236,6 +236,8 @@ impl DatasetBuilder {
     /// Randomly selects data to allocate
     /// If you'd prefer, you can also use `add_test_data` to add it directly
     /// <br>e.g. `allocate_to_test_data(0.2)` will allocate 20% of the data at random to test data
+    /// # Panics
+    /// If there is not a enough data to allocate to the test data
     pub fn allocate_to_test_data(mut self, ratio: f32) -> Self {
         let count = (self.data.len() as f32 * ratio) as usize;
         assert!(count > 0, "Not enough data to allocate to test data");
@@ -256,6 +258,8 @@ impl DatasetBuilder {
     /// Data must already be added
     /// This selects the same training data each time
     /// <br>e.g `.allocate_range_to_test_data(0..=100)`
+    /// # Panics
+    /// If there is not a enough data to allocate to the test data
     pub fn allocate_range_to_test_data(mut self, range: RangeInclusive<usize>) -> Self {
         assert!(
             !self.data.is_empty(),
@@ -481,22 +485,21 @@ impl DatasetBuilder {
                 .collect::<Vec<Cow<str>>>(); //will either be string or &str
 
             let sta = match col.conversion {
-                Conversion::F32 => ColumnStats::None,
+                Conversion::F32 | Conversion::Function(_) => ColumnStats::None,
                 Conversion::NormaliseMean => {
-                    let ms = self.get_mean_sd(&data);
+                    let ms = DatasetBuilder::get_mean_sd(&data);
                     ColumnStats::MeanSd(ms.0, ms.1)
                 }
                 Conversion::NormaliseMinMax(_, _) => {
-                    let mm = self.get_min_max(&data);
+                    let mm = DatasetBuilder::get_min_max(&data);
                     ColumnStats::MinMax(mm.0, mm.1)
                 }
                 Conversion::OneHot => {
-                    let oh = self.get_one_hot(&data, None);
+                    let oh = DatasetBuilder::get_one_hot(&data, None);
                     ColumnStats::OneHot(oh)
                 }
-                Conversion::Function(_) => ColumnStats::None,
                 Conversion::OneHotTop(max) => {
-                    let oh = self.get_one_hot(&data, Some(max));
+                    let oh = DatasetBuilder::get_one_hot(&data, Some(max));
                     ColumnStats::OneHot(oh)
                 }
             };
@@ -506,7 +509,7 @@ impl DatasetBuilder {
     }
     /// returns the mean and standard deviation for the column
     /// Uses both train and test data to determine
-    fn get_mean_sd(&self, data: &[Cow<str>]) -> (f32, f32) {
+    fn get_mean_sd(data: &[Cow<str>]) -> (f32, f32) {
         let vals = data
             .iter()
             .map(|col| col.parse::<f32>().unwrap_or_default())
@@ -524,7 +527,7 @@ impl DatasetBuilder {
     }
     /// returns values between lower and upper bounds
     /// Uses both train and test data to determine min/max
-    fn get_min_max(&self, data: &[Cow<str>]) -> (f32, f32) {
+    fn get_min_max(data: &[Cow<str>]) -> (f32, f32) {
         let vals = data
             .iter()
             .map(|col| col.parse::<f32>().unwrap_or_default())
@@ -544,9 +547,9 @@ impl DatasetBuilder {
         (min, max)
     }
 
-    /// Returns index, HashMap of String:correct f32 vec
+    /// Returns HashMap of String:correct f32 vec
     /// Uses both train and test data because there may be items in test data which are not in training data
-    fn get_one_hot(&self, data: &[Cow<str>], max: Option<usize>) -> HashMap<String, Vec<f32>> {
+    fn get_one_hot(data: &[Cow<str>], max: Option<usize>) -> HashMap<String, Vec<f32>> {
         let mut map = HashMap::new();
         for w in data {
             let entry = map.entry(w.to_string()).or_insert_with(|| 0usize);
@@ -630,7 +633,7 @@ impl DatasetBuilder {
                 .min_by(|a, b| a.0.cmp(&b.0))
                 .expect("Test data empty");
 
-            assert!(maxcolindex < mintestlen,"A line in the test data does not have enough columns ({testline:?}) ({mintestlen}) vs max column index {} (column {})",maxcolindex,maxcolindex+1);
+            assert!(maxcolindex < mintestlen,"A line in the test data does not have enough columns ({testline:?}) ({mintestlen}) vs max column index {maxcolindex} (column {})",maxcolindex+1);
         }
 
         if !self.headers.is_empty() {

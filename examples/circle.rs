@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use runnt::{
     dataset::{Conversion, Dataset},
-    nn::{self, NN},
+    nn::{self, ReportMetric, NN},
 };
 
-//Example of: Classification, Dataset, run_and_report
+//Example of: Classification, Dataset, train, report
 pub fn main() {
     //generate circular data, everything outside the circle is 0, and inside is 1
     //circle has radius 5
@@ -39,14 +39,7 @@ pub fn main() {
     let mut net = NN::new(&[set.input_size(), 16, set.target_size()]).with_learning_rate(0.03);
 
     //run reporting the mse
-    nn::run_and_report(
-        &set,
-        &mut net,
-        500,
-        1,
-        50,
-        nn::ReportMetric::CorrectClassification,
-    );
+    net.train(&set, 500, 1, 50, ReportMetric::CorrectClassification);
     println!("Generating test data to plot...");
     std::thread::sleep(Duration::from_secs(2));
     println!("x,y,tar,predicted");

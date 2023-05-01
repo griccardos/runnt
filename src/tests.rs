@@ -153,6 +153,8 @@ fn xor_gd() {
 #[test]
 ///use this in documentation
 fn readme() {
+    use crate::dataset::*;
+    use crate::nn::*;
     //XOR
 
     let inputs = [[0., 0.], [0., 1.], [1., 0.], [1., 1.]];
@@ -178,16 +180,22 @@ fn readme() {
     .build();
 
     let mut net = NN::new(&[set.input_size(), 32, set.target_size()]).with_learning_rate(0.15);
-    run_and_report(&set, &mut net, 100, 8, 10, ReportMetric::CorrectClassification);
+    net.train(&set, 100, 8, 10, ReportMetric::CorrectClassification);
     }
 
+
     //run only if have diamonds dataset
+
     if !Path::new(r"/temp/diamonds.csv").exists(){
         return;
     }
-    use crate::dataset::*;
-    use crate::nn::*;
 
+    //run only on release
+    if cfg!(release_assertions) 
+     {
+   
+
+    
     let set = Dataset::builder()
         .read_csv(r"/temp/diamonds.csv")
         .allocate_to_test_data(0.2)
@@ -205,9 +213,13 @@ fn readme() {
     } else {
         NN::new(&[set.input_size(), 32, set.target_size()])
     };
+
     //run for 100 epochs, with batch size 32 and report mse every 10 epochs
-    run_and_report(&set, &mut net, 100, 32, 10, ReportMetric::RSquared);
+    net.train(&set, 100, 32, 10, ReportMetric::RSquared);
     net.save(save_path);
+}
+    
+    
 }
 #[test]
 fn test_save_load() {

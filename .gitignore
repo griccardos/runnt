@@ -4,3 +4,4 @@ working
 .devcontainer
 *.svg
 perf.data*
+clippy.txt

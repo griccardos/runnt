@@ -28,7 +28,7 @@ pub fn main() {
         .add_input_columns(&[0], runnt::dataset::Conversion::F32)
         .add_target_columns(&[1], runnt::dataset::Conversion::F32)
         .build();
-    nn::run_and_report(&set, &mut nn, 1000, 1, 100, nn::ReportMetric::None);
+    nn.train(&set, 1000, 1, 100, nn::ReportMetric::None);
 
     inp_out
         .iter()

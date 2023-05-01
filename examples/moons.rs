@@ -1,8 +1,12 @@
-use std::f32::consts::PI;
+use std::{f32::consts::PI, time::Duration};
 
-use runnt::{activation::ActivationType, dataset::Dataset, nn::max_index};
+use runnt::{
+    activation::ActivationType,
+    dataset::Dataset,
+    nn::{max_index, ReportMetric},
+};
 
-// Example: Classification, dataset, run_and_report
+// Example: Classification, dataset, train
 pub fn main() {
     fastrand::seed(1);
 
@@ -40,14 +44,10 @@ pub fn main() {
         .with_output_type(ActivationType::Linear)
         .with_learning_rate(0.5); //Learning rate
 
-    runnt::nn::run_and_report(
-        &set,
-        &mut nn,
-        100,
-        1,
-        10,
-        runnt::nn::ReportMetric::CorrectClassification,
-    );
+    nn.train(&set, 100, 1, 10, ReportMetric::CorrectClassification);
+
+    println!("Generating test data to plot...");
+    std::thread::sleep(Duration::from_secs(2));
 
     println!("x,y,tar,predicted");
     set.get_test_data_zip().iter().take(400).for_each(|x| {

@@ -1,3 +1,10 @@
+### 0.7.0
+- change `run_and_report` to `train`, and add to `NN`
+- add `report` to `NN`
+- add more tests
+- fix examples and tests
+- cleanup
+
 ### 0.6.0
 - changed pass in borrowed data to add_data for dataset
 - added 2 moons example

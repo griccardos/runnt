@@ -54,7 +54,7 @@ impl NN {
     ///  output layer type: Linear  <br/>
     ///  weight initialization: Random  <br/>
     ///
-    /// #Panics
+    /// # Panics
     /// If network shape does not have at least 2 layers
 
     pub fn new(network_shape: &[usize]) -> NN {
@@ -119,6 +119,7 @@ impl NN {
 
     /// Output Layer becomes softmax, and we calculate cross entropy error
     /// Often speeds up learning in classification
+
     pub fn with_softmax_and_crossentropy(mut self) -> Self {
         self.use_softmax_crossentropy = true;
         self
@@ -162,6 +163,8 @@ impl NN {
     /// 3. Backprop to calculate gradient
     /// 4. Regularize
     /// 5. Applies gradients to weights and biases
+    /// # Panics
+    /// If target's length does not match that of the network
     pub fn fit_batch(&mut self, inputs: &[&Vec<f32>], targets: &[&Vec<f32>]) {
         assert_eq!(
             &targets[0].len(),
@@ -169,31 +172,20 @@ impl NN {
             "Target size does not match network output size"
         );
 
-        let inputs_matrix = self.to_matrix(inputs);
-        let targets_matrix = self.to_matrix(targets);
+        let inputs_matrix = to_matrix(inputs);
+        let targets_matrix = to_matrix(targets);
         let values = self.internal_forward(&inputs_matrix);
-        let outputs = values.last().expect("There should be outputs").clone();
-        let loss = self.output_loss(&outputs, &targets_matrix);
-        let (mut weights, biases) = self.backwards(values, loss);
+        let outputs = values.last().expect("There should be outputs");
+        let loss = NN::output_loss(outputs, &targets_matrix);
+        let (mut weights, biases) = self.backwards(&values, loss);
         self.regularize(&mut weights);
 
         self.apply_gradients(&weights, &biases);
     }
 
-    /// convert this into 2x2 Matrix
-    /// Each column is an input into the neural network
-    /// Each row is an example
-    fn to_matrix(&self, vec: &[&Vec<f32>]) -> Array2<f32> {
-        Array2::from_shape_vec(
-            (vec.len(), vec[0].len()),
-            vec.iter().flat_map(|x| x.to_owned()).copied().collect(),
-        )
-        .expect("shape not allowed by size of vec")
-    }
-
     /// Forward inputs into the network, and returns output result i.e. `prediction`
     pub fn forward(&self, input: &[f32]) -> Vec<f32> {
-        let inputs = self.to_matrix(&[&input.to_vec()]);
+        let inputs = to_matrix(&[&input.to_vec()]);
         let values = self.internal_forward(&inputs);
         values
             .last()
@@ -209,11 +201,13 @@ impl NN {
     }
 
     /// Forward batch, and get mean error
+    /// # Panics
+    /// if inputs or targets are  empty
     pub fn forward_errors(&self, inputs: &[&Vec<f32>], targets: &[&Vec<f32>]) -> f32 {
         assert!(!inputs.is_empty(), "No inputs");
         assert!(!targets.is_empty(), "No targets");
-        let inputs = self.to_matrix(inputs);
-        let targets = self.to_matrix(targets);
+        let inputs = to_matrix(inputs);
+        let targets = to_matrix(targets);
         self.internal_forward_errors(&inputs, &targets)
     }
 
@@ -266,7 +260,7 @@ impl NN {
     }
 
     /// calc gradient for each example
-    fn output_loss(&self, outputs: &Array2<f32>, target: &Array2<f32>) -> Array2<f32> {
+    fn output_loss(outputs: &Array2<f32>, target: &Array2<f32>) -> Array2<f32> {
         //MSE LOSS
         //E = error / loss
         //a = value after activation
@@ -322,19 +316,18 @@ impl NN {
 
     fn get_layer_type(&self, layer: usize) -> ActivationType {
         let is_last_layer = layer == self.weights.len() - 1;
-        let ltype = match (is_last_layer, self.use_softmax_crossentropy) {
+        match (is_last_layer, self.use_softmax_crossentropy) {
             (false, _) => self.hidden_type,
             (true, false) => self.output_type,
             (true, true) => ActivationType::Linear, //we use softmax instead,
-        };
-        ltype
+        }
     }
 
     /// Calculates the gradients for all layers.
     /// Returns the weight and bias gradients for each layer
     fn backwards(
         &self,
-        values: Vec<Array2<f32>>,
+        values: &[Array2<f32>],
         output_gradient: Array2<f32>,
     ) -> (Vec<Array2<f32>>, Vec<Array2<f32>>) {
         let layers = self.shape.len();
@@ -616,6 +609,130 @@ impl NN {
     pub fn get_shape(&self) -> Vec<usize> {
         self.shape.clone()
     }
+
+    /// Train with dataset
+    /// This is the same as running `fit` for a number of epochs
+    /// and reporting on each epoch
+    /// 1. getting shuffled data and test data from Dataset
+    /// 2. fitting data with batch size
+    /// 3. reporting train and test error
+    /// 4. Report metric applied to both train and test data
+    pub fn train(
+        &mut self,
+        set: &Dataset,
+        epochs: usize,
+        batch_size: usize,
+        report_epoch: usize,
+        metric: ReportMetric,
+    ) {
+        let start = Instant::now();
+        let acc = match metric {
+            ReportMetric::None => "",
+            ReportMetric::CorrectClassification | ReportMetric::Custom(_) => " train_acc test_acc",
+            ReportMetric::RSquared => " train_R² test R²",
+        };
+        println!("epoch train_error test_error{acc} duration(s)");
+        for e in 1..=epochs {
+            let (inp, tar) = set.get_data();
+            self.fit(&inp, &tar, batch_size);
+
+            if report_epoch > 0 && e % report_epoch == 0 {
+                //get error
+                let train_err = self.forward_errors(&inp, &tar);
+                let (inp_test, tar_test) = set.get_test_data();
+                let test_err = if inp_test.is_empty() {
+                    0.
+                } else {
+                    self.forward_errors(&inp_test, &tar_test)
+                };
+
+                //get accuracy
+                let train_acc = self.report(&metric, &inp, &tar);
+                let test_acc = if inp_test.is_empty() {
+                    String::new()
+                } else {
+                    self.report(&metric, &inp_test, &tar_test)
+                };
+
+                let acc = format!(" {train_acc} {test_acc}");
+
+                println!(
+                    "{e} {train_err} {test_err}{acc} {:.1}",
+                    start.elapsed().as_secs_f32()
+                );
+            }
+        }
+    }
+
+    ///Returns `ReportMetric` for given inputs and targets
+    pub fn report(
+        &self,
+        metric: &ReportMetric,
+        inp: &Vec<&Vec<f32>>,
+        tar: &Vec<&Vec<f32>>,
+    ) -> String {
+        let mut acc_string = String::new();
+
+        match *metric {
+            ReportMetric::None => {}
+            ReportMetric::CorrectClassification => {
+                let mut count = 0;
+                for (inp, tar) in inp.iter().zip(tar) {
+                    let pred = self.forward(inp);
+                    if max_index_equal(tar, &pred) {
+                        count += 1;
+                    }
+                }
+
+                let t_acc = count as f32 / inp.len() as f32 * 100.;
+                acc_string = format!("{t_acc:.2}%");
+            }
+            ReportMetric::RSquared => {
+                // Calc 1 - SSR/SST = 1 - Σ(y-ŷ)/Σ(y-ȳ)
+                //get ȳ
+                //Rsquared is usually just one regression output, however if there are multiple,
+                //we calculated  the r2 for each output
+
+                //TRAIN,TEST
+                let pred: Vec<Vec<f32>> = inp.iter().map(|inp| self.forward(inp)).collect();
+                let mut r2s = vec![];
+                for i in 0..tar[0].len() {
+                    let tar = tar.iter().map(|x| x[i]).collect::<Vec<_>>();
+                    let pred = pred.iter().map(|x| x[i]).collect::<Vec<_>>();
+                    let avg: f32 = tar.iter().sum::<f32>() / tar.len() as f32;
+                    let sst = tar.iter().map(|x| (x - avg).powi(2)).sum::<f32>();
+                    let ssr = tar
+                        .into_iter()
+                        .zip(pred)
+                        .map(|(tar, pred)| (tar - pred).powi(2))
+                        .sum::<f32>();
+                    let r2 = 1. - ssr / sst;
+                    r2s.push(r2);
+                }
+                let r2 = r2s.iter().sum::<f32>() / r2s.len() as f32;
+
+                acc_string = format!("{r2}");
+            }
+            ReportMetric::Custom(fun) => {
+                let mut trains = vec![];
+                for (inp, tar) in inp.iter().zip(tar) {
+                    let pred = self.forward(inp);
+                    trains.push(
+                        tar.iter()
+                            .zip(pred)
+                            .map(|a| TargetPredicted {
+                                target: *a.0,
+                                predicted: a.1,
+                            })
+                            .collect::<Vec<_>>(),
+                    );
+                }
+
+                acc_string = fun(trains);
+            }
+        }
+        acc_string
+    }
 }
 
 impl Display for NN {
@@ -682,10 +799,22 @@ pub fn max_index(vec: &[f32]) -> usize {
         .0
 }
 
+/// convert this into Matrix
+/// Each column is an input into the neural network
+/// Each row is an example
+fn to_matrix(vec: &[&Vec<f32>]) -> Array2<f32> {
+    Array2::from_shape_vec(
+        (vec.len(), vec[0].len()),
+        vec.iter().flat_map(ToOwned::to_owned).copied().collect(),
+    )
+    .expect("shape not allowed by size of vec")
+}
+
 pub struct TargetPredicted {
     pub target: f32,
     pub predicted: f32,
 }
+
 pub type CustomMetric = fn(Vec<Vec<TargetPredicted>>) -> String;
 ///Reporting metric
 pub enum ReportMetric {
@@ -716,128 +845,6 @@ pub enum ReportMetric {
     ///};
     ///```
     Custom(CustomMetric),
-}
-
-/// Basic Runner that loops through:
-/// 1. getting shuffled data and test data from Dataset
-/// 2. fitting data with batch size
-/// 3. reporting train and test error
-/// 4. Report metric applied to both train and test data
-pub fn run_and_report(
-    set: &Dataset,
-    net: &mut NN,
-    epochs: usize,
-    batch_size: usize,
-    report_epoch: usize,
-    metric: ReportMetric,
-) {
-    let start = Instant::now();
-    let acc = match metric {
-        ReportMetric::None => "",
-        ReportMetric::CorrectClassification => " train_acc test_acc",
-        ReportMetric::RSquared => " train_R² test R²",
-        ReportMetric::Custom(_) => " train_acc test_acc",
-    };
-    println!("epoch train_error test_error{acc} duration(s)");
-    for e in 1..=epochs {
-        let (inp, tar) = set.get_data();
-        net.fit(&inp, &tar, batch_size);
-
-        if report_epoch > 0 && e % report_epoch == 0 {
-            //get error
-            let train_err = net.forward_errors(&inp, &tar);
-            let (inp_test, tar_test) = set.get_test_data();
-            let test_err = if inp_test.is_empty() {
-                0.
-            } else {
-                net.forward_errors(&inp_test, &tar_test)
-            };
-
-            //get accuracy
-            let train_acc = get_report(&metric, net, &inp, &tar);
-            let test_acc = if inp_test.is_empty() {
-                format!("")
-            } else {
-                get_report(&metric, net, &inp_test, &tar_test)
-            };
-
-            let acc = format!(" {train_acc} {test_acc}");
-
-            println!(
-                "{e} {train_err} {test_err}{acc} {:.1}",
-                start.elapsed().as_secs_f32()
-            );
-        }
-    }
-}
-
-pub fn get_report(
-    metric: &ReportMetric,
-    net: &mut NN,
-    inp: &Vec<&Vec<f32>>,
-    tar: &Vec<&Vec<f32>>,
-) -> String {
-    let mut acc_string = "".to_string();
-
-    match *metric {
-        ReportMetric::None => {}
-        ReportMetric::CorrectClassification => {
-            let mut count = 0;
-            for (inp, tar) in inp.iter().zip(tar) {
-                let pred = net.forward(inp);
-                if max_index_equal(tar, &pred) {
-                    count += 1;
-                }
-            }
-
-            let t_acc = count as f32 / inp.len() as f32 * 100.;
-            acc_string = format!("{t_acc:.2}%");
-        }
-        ReportMetric::RSquared => {
-            // Calc 1 - SSR/SST = 1 - Σ(y-ŷ)/Σ(y-ȳ)
-            //get ȳ
-            //Rsquared is usually just one regression output, however if there are multiple,
-            //we calculated  the r2 for each output
-
-            //TRAIN,TEST
-            let pred: Vec<Vec<f32>> = inp.iter().map(|inp| net.forward(inp)).collect();
-            let mut r2s = vec![];
-            for i in 0..tar[0].len() {
-                let tar = tar.iter().map(|x| x[i]).collect::<Vec<_>>();
-                let pred = pred.iter().map(|x| x[i]).collect::<Vec<_>>();
-                let avg: f32 = tar.iter().sum::<f32>() / tar.len() as f32;
-                let sst = tar.iter().map(|x| (x - avg).powi(2)).sum::<f32>();
-                let ssr = tar
-                    .into_iter()
-                    .zip(pred)
-                    .map(|(tar, pred)| (tar - pred).powi(2))
-                    .sum::<f32>();
-                let r2 = 1. - ssr / sst;
-                r2s.push(r2);
-            }
-            let r2 = r2s.iter().sum::<f32>() / r2s.len() as f32;
-
-            acc_string = format!("{}", r2);
-        }
-        ReportMetric::Custom(fun) => {
-            let mut trains = vec![];
-            for (inp, tar) in inp.iter().zip(tar) {
-                let pred = net.forward(inp);
-                trains.push(
-                    tar.iter()
-                        .zip(pred)
-                        .map(|a| TargetPredicted {
-                            target: *a.0,
-                            predicted: a.1,
-                        })
-                        .collect::<Vec<_>>(),
-                );
-            }
-
-            acc_string = format!("{}", fun(trains));
-        }
-    }
-    acc_string
 }
 
 #[cfg(test)]
