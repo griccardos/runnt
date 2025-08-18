@@ -10,26 +10,7 @@ use runnt::{
 pub fn main() {
     fastrand::seed(1);
 
-    //generate function which we want to predict
-    let sine1 = |x: f32| (x * 2. + PI * 2. / 4.).sin() + fastrand::f32() / 2. - 0.2;
-    let sine2 = |x: f32| (x * 2. + PI * 4. / 4.).sin() + fastrand::f32() / 2. - 0.2;
-
-    //get some observations
-    let mut inp_out = vec![];
-    //moon1 from -1 to 1
-    (0..1000).for_each(|_| {
-        let x = fastrand::f32() * 2. - 1.;
-        let y = sine1(x);
-        let cat = 0.;
-        inp_out.push(vec![x, y, cat]);
-    });
-    //moon2 from 0 to 2
-    (0..1000).for_each(|_| {
-        let x = fastrand::f32() * 2.;
-        let y = sine2(x);
-        let cat = 1.;
-        inp_out.push(vec![x, y, cat]);
-    });
+    let inp_out = generate_moons();
 
     let set = Dataset::builder()
         .add_data(&inp_out)
@@ -51,13 +32,37 @@ pub fn main() {
 
     println!("x,y,tar,predicted");
     set.get_test_data_zip().iter().take(400).for_each(|x| {
-        let pred = nn.forward(&x.0);
-        println!(
-            "{},{},{},{}",
-            x.0[0],
-            x.0[1],
-            max_index(x.1),
-            max_index(&pred),
-        );
-    });
+    let pred = nn.forward(&x.0);
+    println!(
+        "{},{},{},{}",
+        x.0[0],
+        x.0[1],
+        max_index(x.1),
+        max_index(&pred),
+    );
+});
 }
+
+pub fn generate_moons() -> Vec<Vec<f32>> {
+    //generate function which we want to predict
+    let sine1 = |x: f32| (x * 2. + PI * 2. / 4.).sin() + fastrand::f32() / 2. - 0.2;
+    let sine2 = |x: f32| (x * 2. + PI * 4. / 4.).sin() + fastrand::f32() / 2. - 0.2;
+    
+    //get some observations
+    let mut inp_out = vec![];
+    //moon1 from -1 to 1
+    (0..1000).for_each(|_| {
+        let x = fastrand::f32() * 2. - 1.;
+        let y = sine1(x);
+        let cat = 0.;
+        inp_out.push(vec![x, y, cat]);
+    });
+    //moon2 from 0 to 2
+    (0..1000).for_each(|_| {
+        let x = fastrand::f32() * 2.;
+        let y = sine2(x);
+        let cat = 1.;
+        inp_out.push(vec![x, y, cat]);
+    });
+    inp_out
+    }

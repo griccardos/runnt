@@ -486,14 +486,14 @@ impl NN {
 
             vec.push(format!("weight={weights}"));
         }
-         let result = std::fs::write(path.as_ref(), vec.join("\n"));
-            if let Err(err) = result {
-                println!(
-                    "Could not write file {:?}: {}",
-                    path.as_ref().as_os_str(),
-                    err
-                );
-            }
+        let result = std::fs::write(path.as_ref(), vec.join("\n"));
+        if let Err(err) = result {
+            println!(
+                "Could not write file {:?}: {}",
+                path.as_ref().as_os_str(),
+                err
+            );
+        }
     }
     ///Load from file
     /// # Panics
@@ -502,10 +502,9 @@ impl NN {
         let data: Vec<Vec<String>> = std::fs::read_to_string(path)
             .expect("Could not load from file")
             .split('\n')
-            .map(|x| {
-                x.split('=')
-                    .map(std::string::ToString::to_string)
-                    .collect::<Vec<String>>()
+            .filter_map(|x| {
+                x.split_once('=')
+                    .map(|(k,v)|vec![k.to_string(), v.to_string()])
             })
             .collect();
 
@@ -813,9 +812,17 @@ pub fn max_index(vec: &[f32]) -> usize {
 /// Each column is an input into the neural network
 /// Each row is an example
 fn to_matrix(vec: &[&Vec<f32>]) -> Array2<f32> {
+    assert!(!vec.is_empty(), "Input vec is empty");
+
+    let rows = vec.len();
+    let cols = vec[0].len();
+    let mut data = Vec::with_capacity(rows * cols);
+    for r in vec{
+        data.extend_from_slice(r);
+    }
     Array2::from_shape_vec(
         (vec.len(), vec[0].len()),
-        vec.iter().flat_map(ToOwned::to_owned).copied().collect(),
+        data
     )
     .expect("shape not allowed by size of vec")
 }
