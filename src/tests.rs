@@ -191,8 +191,9 @@ fn readme() {
     }
 
     //run only on release
-    if cfg!(release_assertions) 
-     {
+    if cfg!(debug_assertions) {
+        return;
+    }
    
 
     
@@ -217,7 +218,6 @@ fn readme() {
     //run for 100 epochs, with batch size 32 and report mse every 10 epochs
     net.train(&set, 100, 32, 10, ReportMetric::RSquared);
     net.save(save_path);
-}
     
     
 }
@@ -274,7 +274,7 @@ fn test_softmax_splits_even() {
         .with_softmax_and_crossentropy();
     let test = arr2(&[[5.], [3.]]); //they should all have the same weight so 0.25
     let out = nn.internal_forward(&test);
-    let out = out.last().unwrap();
+    let out = out.activated.last().unwrap();
     for row in out.rows() {
         assert_eq!(row.to_vec(), [0.25, 0.25, 0.25, 0.25]);
     }
@@ -285,7 +285,7 @@ fn test_softmax_sums_to_one() {
     let nn = NN::new(&[1, 10, 8]).with_softmax_and_crossentropy();
     let test = arr2(&[[5.], [3.]]);
     let out = nn.internal_forward(&test);
-    let out = out.last().unwrap();
+    let out = out.activated.last().unwrap();
     for row in out.rows() {
         let sum = row.sum();
         assert!(sum.abs() - 1.0 < 0.00001);

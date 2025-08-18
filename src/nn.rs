@@ -60,7 +60,6 @@ impl NN {
     pub fn new(network_shape: &[usize]) -> NN {
         let mut weights = vec![];
         let mut bias = vec![];
-        let mut values = vec![];
 
         let layers = network_shape.len();
         assert!(
@@ -70,8 +69,6 @@ impl NN {
 
         for l1 in 0..layers {
             let this_size = network_shape[l1];
-
-            values.push(Array::from_shape_fn([1, this_size], |_| 0.));
 
             //dont need for last layer
             if l1 < layers - 1 {
@@ -175,9 +172,9 @@ impl NN {
         let inputs_matrix = to_matrix(inputs);
         let targets_matrix = to_matrix(targets);
         let values = self.internal_forward(&inputs_matrix);
-        let outputs = values.last().expect("There should be outputs");
+        let outputs = values.activated.last().expect("There should be outputs");
         let loss = NN::output_loss(outputs, &targets_matrix);
-        let (mut weights, biases) = self.backwards(&values, loss);
+        let (mut weights, biases) = self.backwards(values, loss);
         self.regularize(&mut weights);
 
         self.apply_gradients(&weights, &biases);
@@ -187,11 +184,9 @@ impl NN {
     pub fn forward(&self, input: &[f32]) -> Vec<f32> {
         let inputs = to_matrix(&[&input.to_vec()]);
         let values = self.internal_forward(&inputs);
-        values
-            .last()
-            .expect("There should be outputs")
-            .clone()
-            .into_raw_vec()
+        let vals = values.activated.last().expect("There should be outputs");
+        //now return the values as a vec
+        vals.flatten().to_vec()
     }
 
     /// Forward inputs to get error
@@ -214,7 +209,7 @@ impl NN {
     fn internal_forward_errors(&self, inputs: &Array2<f32>, targets: &Array2<f32>) -> f32 {
         let count = inputs.shape()[0];
         let vals = self.internal_forward(inputs);
-        let outs = vals.last().expect("There should be outputs");
+        let outs = vals.activated.last().expect("There should be outputs");
         let errs = self.internal_calc_errors(outs, targets);
         errs.iter().sum::<f32>() / count as f32
     }
@@ -281,37 +276,42 @@ impl NN {
     /// each value is in a different column
     /// so for 32 examples in a 10 node layer we have 32x10 matrix
     /// if softmax, we convert last layer
-    fn internal_forward(&self, input: &Array2<f32>) -> Vec<Array2<f32>> {
+    fn internal_forward(&self, input: &Array2<f32>) -> ValueAndActivated {
         assert_eq!(
             input.shape()[1],
             self.shape[0],
             "Input size does not equal first layer size"
         ); //columns = number of nodes in first layer
 
+        let mut activated = Vec::new();
         let mut values = Vec::new();
+
+        activated.push(input.clone());
         values.push(input.clone());
 
         for l in 0..self.weights.len() {
-            let mut sum = &values[l].dot(&self.weights[l]) + &self.bias[l];
+            let mut act_sum = &activated[l].dot(&self.weights[l]) + &self.bias[l];
+            let sum = act_sum.clone();
 
             //apply activation
             let ltype = self.get_layer_type(l);
-            sum.mapv_inplace(|a| activate(a, ltype));
+            act_sum.mapv_inplace(|a| activate(a, ltype));
 
             //if softmax
             let is_last_layer = l == self.weights.len() - 1;
             if is_last_layer && self.use_softmax_crossentropy {
-                sum.mapv_inplace(f32::exp); //calc e^val
-                let sums = sum.sum_axis(Axis(1)); //sum all rows
-                for (ri, mut r) in sum.rows_mut().into_iter().enumerate() {
+                act_sum.mapv_inplace(f32::exp); //calc e^val
+                let sums = act_sum.sum_axis(Axis(1)); //sum all rows
+                for (ri, mut r) in act_sum.rows_mut().into_iter().enumerate() {
                     r.mapv_inplace(|a| a / sums[ri]);
                 }
             }
 
+            activated.push(act_sum);
             values.push(sum);
         }
 
-        values
+        ValueAndActivated { values, activated }
     }
 
     fn get_layer_type(&self, layer: usize) -> ActivationType {
@@ -327,7 +327,7 @@ impl NN {
     /// Returns the weight and bias gradients for each layer
     fn backwards(
         &self,
-        values: &[Array2<f32>],
+        values_and_activations: ValueAndActivated,
         output_gradient: Array2<f32>,
     ) -> (Vec<Array2<f32>>, Vec<Array2<f32>>) {
         let layers = self.shape.len();
@@ -357,12 +357,23 @@ impl NN {
 
         //backprop to each layer
         for l in (0..layers - 1).rev() {
-            let next_values = &values[l + 1]; //A
-            let this_values = &values[l]; //In
+            let next_activations = &values_and_activations.activated[l + 1]; //A
+            let this_values = &values_and_activations.activated[l]; //In
             let this_weights = &self.weights[l]; //W
+            let next_values = &values_and_activations.values[l + 1]; //Z - needed for derivative sometimes
             let ltype = self.get_layer_type(l);
 
-            let da_dz = next_values.map(|&a| activate_der(a, ltype)); //dA/dZ
+            //we calc derivative of activation function for each example in the batch
+            let example_count = next_activations.shape()[0];
+            let number_count = next_activations.shape()[1];
+            let mut da_dz: Array2<f32> = next_activations.clone();
+            for e in 0..example_count {
+                for n in 0..number_count {
+                    da_dz[[e, n]] =
+                        activate_der(next_values[(e, n)], next_activations[(e, n)], ltype);
+                }
+            }
+            //dA/dZ
             let de_dz = &next_layer_error_deriv * &da_dz; //dE/dA * dA/dZ = dE/dZ
 
             //here error_grad_bias is numberexamples x size. But we only keep the sum so make 1xsize
@@ -474,8 +485,8 @@ impl NN {
                 .join(";");
 
             vec.push(format!("weight={weights}"));
-
-            let result = std::fs::write(path.as_ref(), vec.join("\n"));
+        }
+         let result = std::fs::write(path.as_ref(), vec.join("\n"));
             if let Err(err) = result {
                 println!(
                     "Could not write file {:?}: {}",
@@ -483,7 +494,6 @@ impl NN {
                     err
                 );
             }
-        }
     }
     ///Load from file
     /// # Panics
@@ -845,6 +855,13 @@ pub enum ReportMetric {
     ///};
     ///```
     Custom(CustomMetric),
+}
+
+struct ValueAndActivated {
+    ///holds the output values Z=(WxI)
+    values: Vec<Array2<f32>>,
+    ///hold the activated values A=f(Z)
+    activated: Vec<Array2<f32>>,
 }
 
 #[cfg(test)]

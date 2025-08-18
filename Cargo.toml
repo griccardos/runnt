@@ -1,6 +1,6 @@
 [package]
 name = "runnt"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 license = "MIT"
 description = "Easy Neural Network for machine learning"
@@ -10,11 +10,11 @@ keywords = ["reinforcement", "ai","qlearning","machinelearning","learning"]
 categories = ["science","algorithms"]
 
 [dependencies]
-fastrand="1.9.0" #for random
-ndarray = "0.15.6" #for matrix
+fastrand="2.3" #for random
+ndarray = "0.16" #for matrix
 
 [dev-dependencies]
-criterion = "0.4" #for bench
+criterion = "0" #for bench
 tempfile = "3.5.0" #for test
 
 [[bench]]

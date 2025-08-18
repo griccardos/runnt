@@ -4,7 +4,7 @@ type Inputs = Vec<f32>;
 type Targets = Vec<f32>;
 
 /// Holds and manages dataset
-/// This is not required, as NN takes Vec<f32> directly
+/// This is not required, as NN takes `Vec<f32>` directly
 /// However you may want to manage the dataset for example by:
 /// - ignoring certain columns
 /// - normalising data
@@ -663,7 +663,7 @@ mod tests {
 
     #[test]
     fn shuf() {
-        fastrand::seed(1);
+        fastrand::seed(2);
         let data = vec![vec!["1", "2", "3"], vec!["4", "5", "6"]];
         let set = Dataset::builder()
             .add_data(&data)

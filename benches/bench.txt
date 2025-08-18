@@ -1,5 +1,21 @@
 cargo bench --bench=iterations -- --quick
 
+# 0.8.0
+forward and back/matrix time:   [10.339 µs 10.341 µs 10.349 µs]
+                        thrpt:  [96.630 Kelem/s 96.701 Kelem/s 96.719 Kelem/s]
+
+forward/matrix          time:   [2.5780 µs 2.5807 µs 2.5814 µs]
+                        thrpt:  [387.39 Kelem/s 387.49 Kelem/s 387.90 Kelem/s]
+
+forward and back batch/matrix
+                        time:   [146.40 µs 147.10 µs 147.27 µs]
+                        thrpt:  [679.02 Kelem/s 679.82 Kelem/s 683.04 Kelem/s]
+
+forward error batch/matrix
+                        time:   [63.776 µs 64.239 µs 64.355 µs]
+                        thrpt:  [1.5539 Melem/s 1.5567 Melem/s 1.5680 Melem/s]
+
+
 # 0.7.0
 forward and back/matrix time:   [13.662 µs 13.680 µs 13.685 µs]
                         thrpt:  [73.074 Kelem/s 73.099 Kelem/s 73.196 Kelem/s]
@@ -14,3 +30,4 @@ forward and back batch/matrix
 forward error batch/matrix
                         time:   [66.342 µs 66.426 µs 66.762 µs]
                         thrpt:  [1.4979 Melem/s 1.5054 Melem/s 1.5073 Melem/s]
+

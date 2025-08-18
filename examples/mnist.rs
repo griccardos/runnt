@@ -16,9 +16,10 @@ pub fn main() {
     if args.len() != 2 {
         println!(
             r"
-Files can be downloaded from http://yann.lecun.com/exdb/mnist/
+Files can be downloaded from https://www.kaggle.com/datasets/hojjatk/mnist-dataset
+Or original from http://yann.lecun.com/exdb/mnist/
 Extract the files
-Pass in path of the 4 mnist files which have been extracted
+Pass in path of the *4* mnist files which have been extracted
 cargo run --release --example mnist -- /tmp/mnist
         "
         );
