@@ -82,10 +82,10 @@ pub fn main() {
         .filter(|i| i.0 % (inp_out.len() / 20) == 0)
         .map(|x| x.1)
         .for_each(|(x, y, truey)| {
-            let pred = nn.forward(&x);
-            let predl2 = nnl2.forward(&x);
-            let predl1 = nnl1.forward(&x);
-            let predl1l2 = nnl1l2.forward(&x);
+            let pred = nn.forward(x);
+            let predl2 = nnl2.forward(x);
+            let predl1 = nnl1.forward(x);
+            let predl1l2 = nnl1l2.forward(x);
             let x = x[0];
             let noisey = y[0];
             let truey = truey[0];

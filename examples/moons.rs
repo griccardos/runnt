@@ -32,7 +32,7 @@ pub fn main() {
 
     println!("x,y,tar,predicted");
     set.get_test_data_zip().iter().take(400).for_each(|x| {
-    let pred = nn.forward(&x.0);
+    let pred = nn.forward(x.0);
     println!(
         "{},{},{},{}",
         x.0[0],

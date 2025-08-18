@@ -22,7 +22,7 @@ fn test_xor() {
 
     //check forward
     let vals = nn.forward(&[0., 0.]);
-    assert_eq!(vals, [0.750002384]);
+    assert_eq!(vals, [0.7500024]);
 
     //check first 4
     let inputs = [[0., 0.], [0., 1.], [1., 0.], [1., 1.]];
@@ -33,7 +33,7 @@ fn test_xor() {
         //1
         [arr2(&[[0.35, 0.35]]), arr2(&[[0.6]])].to_vec(),
         //2
-        [arr2(&[[0.343179762, 0.342327237]]), arr2(&[[0.529687762]])].to_vec(),
+        [arr2(&[[0.34317976, 0.34232724]]), arr2(&[[0.52968776]])].to_vec(),
         //3
         [arr2(&[[0.3452806, 0.34468588]]), arr2(&[[0.555233]])].to_vec(),
         //4
@@ -170,23 +170,20 @@ fn readme() {
     }
 
     //iris
-    #[cfg_attr(rustfmt, rustfmt_skip)] 
-    {
+
     let set = Dataset::builder()
-    .read_csv("examples/data/iris.csv")
-    .add_input_columns(&[0, 1, 2, 3], Conversion::NormaliseMean)
-    .add_target_columns(&[4], Conversion::OneHot)
-    .allocate_to_test_data(0.4)
-    .build();
+        .read_csv("examples/data/iris.csv")
+        .add_input_columns(&[0, 1, 2, 3], Conversion::NormaliseMean)
+        .add_target_columns(&[4], Conversion::OneHot)
+        .allocate_to_test_data(0.4)
+        .build();
 
     let mut net = NN::new(&[set.input_size(), 32, set.target_size()]).with_learning_rate(0.15);
     net.train(&set, 100, 8, 10, ReportMetric::CorrectClassification);
-    }
-
 
     //run only if have diamonds dataset
 
-    if !Path::new(r"/temp/diamonds.csv").exists(){
+    if !Path::new(r"/temp/diamonds.csv").exists() {
         return;
     }
 
@@ -194,9 +191,7 @@ fn readme() {
     if cfg!(debug_assertions) {
         return;
     }
-   
 
-    
     let set = Dataset::builder()
         .read_csv(r"/temp/diamonds.csv")
         .allocate_to_test_data(0.2)
@@ -218,8 +213,6 @@ fn readme() {
     //run for 100 epochs, with batch size 32 and report mse every 10 epochs
     net.train(&set, 100, 32, 10, ReportMetric::RSquared);
     net.save(save_path);
-    
-    
 }
 #[test]
 fn test_save_load() {
@@ -238,7 +231,7 @@ fn test_save_load() {
     let orig = nn.get_weights();
     let orig_shape = nn.get_shape();
     println!("shape:{orig_shape:?} weights:{orig:?}");
-    nn.save(&path);
+    nn.save(path);
     let nn2 = NN::load(path);
     let new = nn2.get_weights();
     let new_shape = nn2.get_shape();
@@ -292,24 +285,57 @@ fn test_softmax_sums_to_one() {
     }
 }
 
-//test against known weights, 
+//test against known weights,
 // calculated weights manually, and with keras
 #[test]
 fn known_weights() {
-    
+    let mut nn = NN::new(&[2, 3, 2])
+        .with_output_type(ActivationType::Sigmoid)
+        .with_learning_rate(1.);
+    nn.set_weights(&[
+        0.992836, -0.225479, 0.020898, -0.837574, -0.109230, -0.945061, 0.754052, 0.919311,
+        -0.678429, -0.929159, 0.010026, 0.588599, -0.214042, 0.169462, -0.667714, -0.352136,
+        0.762778,
+    ]);
+    assert_eq!(
+        nn.get_weights(),
+        &[
+            0.992836, -0.225479, 0.020898, -0.837574, -0.109230, -0.945061, 0.754052, 0.919311,
+            -0.678429, -0.929159, 0.010026, 0.588599, -0.214042, 0.169462, -0.667714, -0.352136,
+            0.762778
+        ]
+    );
 
-    let mut nn = NN::new(&[2, 3, 2]).with_output_type(ActivationType::Sigmoid).with_learning_rate(1.);
-    nn.set_weights(&[0.992836,-0.225479,0.020898,-0.837574,-0.109230,-0.945061,0.754052,0.919311,-0.678429,-0.929159,0.010026, 0.588599,-0.214042,0.169462,-0.667714,-0.352136,0.762778]);
-    assert_eq!(nn.get_weights(),&[0.992836,-0.225479,0.020898,-0.837574,-0.109230,-0.945061,0.754052,0.919311,-0.678429,-0.929159,0.010026, 0.588599,-0.214042,0.169462,-0.667714,-0.352136,0.762778]);
+    let orig_weights = nn.get_weights();
 
-    let orig_weights=nn.get_weights();
+    assert_eq!(nn.forward(&[-0.539233, 0.728828]), [0.43365017, 0.6171831]);
+    nn.fit_one(&[-0.539233, 0.728828], &[0., 0.]);
 
-    assert_eq!(nn.forward(&[-0.539233,0.728828]),[0.43365017,0.6171831]);
-    nn.fit_one(&[-0.539233,0.728828], &[0.,0.]);
-
-    let diff = orig_weights.iter().zip(nn.get_weights()).map(|(a,b)|a-b).collect::<Vec<_>>();
-    assert_eq!(diff,[0.012651682,-0.0033963174,0.006875435,-0.017100036,0.0045904666,-0.009292841,-0.023462355,0.006298423,-0.012750387,0.04295206,0.05880838,0.0770424,0.105483666,        0.021434084,0.029346764,0.10650349,0.14582068]);
-
-    
-
+    let diff = orig_weights
+        .iter()
+        .zip(nn.get_weights())
+        .map(|(a, b)| a - b)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        diff,
+        [
+            0.012651682,
+            -0.0033963174,
+            0.006875435,
+            -0.017100036,
+            0.0045904666,
+            -0.009292841,
+            -0.023462355,
+            0.006298423,
+            -0.012750387,
+            0.04295206,
+            0.05880838,
+            0.0770424,
+            0.105483666,
+            0.021434084,
+            0.029346764,
+            0.10650349,
+            0.14582068
+        ]
+    );
 }

@@ -61,8 +61,7 @@ impl FromStr for ActivationType {
             "Linear" => Ok(ActivationType::Linear),
             "Tanh" => Ok(ActivationType::Tanh),
             "Swish" => Ok(ActivationType::Swish),
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            _ => Err(std::io::Error::other(
                 "Unknown activation type",
             )),
         }
@@ -95,7 +94,7 @@ mod tests {
     #[test]
     fn test_linear() {
         assert_eq!(activate(-5.0, ActivationType::Linear), -5.0);
-        assert_eq!(activate(3.14, ActivationType::Linear), 3.14);
+        assert_eq!(activate(3.55, ActivationType::Linear), 3.55);
     }
 
     // Test that Tanh activation returns values between -1 and 1, and matches known values for 0 and large positive/negative inputs
@@ -119,7 +118,7 @@ mod tests {
         assert!((val - 1.0 * expected).abs() < 1e-6);
         let val = activate(-1.0, ActivationType::Swish);
         let expected = 1.0 / (1.0 + (1.0f32).exp());
-        assert!((val - (-1.0 * expected)).abs() < 1e-6);
+        assert!((val - (-expected)).abs() < 1e-6);
     }
 
     #[test]

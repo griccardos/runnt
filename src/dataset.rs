@@ -82,8 +82,8 @@ impl Dataset {
         inp.into_iter().zip(out).collect()
     }
 
-    fn get_shuffled_data(data: &'_ Vec<(Inputs, Targets)>) -> (Vec<&'_ Inputs>, Vec<&'_ Targets>) {
-        let mut indices = (0..data.len()).into_iter().collect::<Vec<_>>();
+    fn get_shuffled_data(data: &[(Inputs, Targets)]) -> (Vec<& Inputs>, Vec<& Targets>) {
+        let mut indices = (0..data.len()).collect::<Vec<_>>();
         fastrand::shuffle(&mut indices);
         let mut vecin = vec![];
         let mut vectar = vec![];
@@ -118,7 +118,6 @@ impl Dataset {
 /// `NormaliseMinMax(f32, f32)` - Nomalises between a given lower and upper bound <br/>
 /// `OneHot` - Creates new column for each one of the unique values with 1 for that and 0 for others <br/>
 /// `Function(fn(&str) -> f32)` - Applies function to convert to f32 <br/>
-
 pub enum Conversion {
     ///Converts string to f32.
     F32,
@@ -241,7 +240,7 @@ impl DatasetBuilder {
     pub fn allocate_to_test_data(mut self, ratio: f32) -> Self {
         let count = (self.data.len() as f32 * ratio) as usize;
         assert!(count > 0, "Not enough data to allocate to test data");
-        let mut indices = (0..self.data.len()).into_iter().collect::<Vec<_>>();
+        let mut indices = (0..self.data.len()).collect::<Vec<_>>();
         fastrand::shuffle(&mut indices);
         let mut indices: Vec<usize> = indices.iter().take(count).copied().collect();
         indices.sort_unstable();
@@ -341,13 +340,11 @@ impl DatasetBuilder {
         let data = traininputs
             .into_iter()
             .zip(traintargets)
-            .map(|(i, o)| (i, o))
             .collect();
 
         let test_data = testinputs
             .into_iter()
             .zip(testtargets)
-            .map(|(i, o)| (i, o))
             .collect();
 
         Dataset {
@@ -572,7 +569,7 @@ impl DatasetBuilder {
 
         let mut hash = HashMap::new();
         for (i, str) in vals.iter().enumerate() {
-            let mut vec: Vec<f32> = std::iter::repeat(0.).take(vals.len()).collect();
+            let mut vec: Vec<f32> = std::iter::repeat_n(0.,vals.len()).collect();
             vec[i] = 1.;
             hash.insert(str.clone(), vec);
         }
@@ -783,8 +780,8 @@ mod tests {
         let test = set.get_test_data();
 
         net.fit_batch(&data.0, &data.1);
-        net.forward_error(&data.0[0], &data.1[0]);
-        net.forward_error(&test.0[0], &test.1[0]);
+        net.forward_error(data.0[0], data.1[0]);
+        net.forward_error(test.0[0], test.1[0]);
     }
     #[test]
     fn test_get() {

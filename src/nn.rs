@@ -56,7 +56,6 @@ impl NN {
     ///
     /// # Panics
     /// If network shape does not have at least 2 layers
-
     pub fn new(network_shape: &[usize]) -> NN {
         let mut weights = vec![];
         let mut bias = vec![];
@@ -116,7 +115,6 @@ impl NN {
 
     /// Output Layer becomes softmax, and we calculate cross entropy error
     /// Often speeds up learning in classification
-
     pub fn with_softmax_and_crossentropy(mut self) -> Self {
         self.use_softmax_crossentropy = true;
         self
@@ -546,7 +544,6 @@ impl NN {
                     .split(';')
                     .map(|f| f.parse::<f32>().unwrap_or_default())
                     .collect::<Vec<f32>>();
-                let bb = bb;
                 let bb = Array2::from_shape_vec([1, bb.len()], bb).expect("Shape is wrong for vec");
 
                 biases.push(bb);

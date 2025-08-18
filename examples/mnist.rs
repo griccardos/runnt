@@ -32,7 +32,9 @@ cargo run --release --example mnist -- /tmp/mnist
         .with_learning_rate(0.15);
 
     let path = &args[1];
-    let (mut training, test) = get_train_test(path);
+    let tt = get_train_test(path);
+    let mut training = tt.train;
+    let test = tt.test;
 
     let start = Instant::now();
 
@@ -55,26 +57,30 @@ cargo run --release --example mnist -- /tmp/mnist
     }
 }
 
-fn get_acc_mse(nn: &NN, data: &Vec<(Vec<f32>, Vec<f32>)>) -> (f32, f32) {
+fn get_acc_mse(nn: &NN, data: &[(Vec<f32>, Vec<f32>)]) -> (f32, f32) {
     let mut sum = 0;
     let mut sse = 0.;
-    for i in 0..data.len() {
-        let pred = nn.forward(data[i].0.as_slice());
+    for dat in data {
+        let pred = nn.forward(dat.0.as_slice());
 
-        if max_index_equal(&pred, &data[i].1) {
+        if max_index_equal(&pred, &dat.1) {
             sum += 1
         }
-        sse += nn.calc_error(&pred, &data[i].1);
+        sse += nn.calc_error(&pred, &dat.1);
     }
 
     let mse = sse / (data.len() as f32);
     let mean_acc = (sum as f32) / (data.len() as f32);
     (mean_acc, mse)
 }
+struct TrainTest{
+    train: Vec<(Vec<f32>, Vec<f32>)>,
+    test: Vec<(Vec<f32>, Vec<f32>)>,
+}
 
 fn get_train_test(
     path: impl AsRef<Path>,
-) -> (Vec<(Vec<f32>, Vec<f32>)>, Vec<(Vec<f32>, Vec<f32>)>) {
+) -> TrainTest {
     // data can be downloaded from http://yann.lecun.com/exdb/mnist/
     // 2 train files, one for labels, one for images
     // 2 test files
@@ -92,7 +98,6 @@ fn get_train_test(
     let mut test_image_path = PathBuf::from("");
     std::fs::read_dir(path)
         .expect("Could not find mnist folder")
-        .into_iter()
         .for_each(|f| {
             if let Ok(ref fi) = f {
                 match fi
@@ -124,7 +129,7 @@ fn get_train_test(
 
     let train = load_image_label(image_path, label_path);
     let test = load_image_label(test_image_path, test_label_path);
-    (train, test)
+    TrainTest { train, test }
 }
 
 fn load_image_label(

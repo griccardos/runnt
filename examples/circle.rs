@@ -19,7 +19,6 @@ pub fn main() {
 
     //get some random points
     let data: Vec<Vec<f32>> = (0..1000)
-        .into_iter()
         .map(|_| {
             let x = fastrand::f32() * 10. - 5.;
             let y = fastrand::f32() * 10. - 5.;
@@ -44,7 +43,7 @@ pub fn main() {
     std::thread::sleep(Duration::from_secs(2));
     println!("x,y,tar,predicted");
     set.get_test_data_zip().iter().for_each(|x| {
-        let pred = net.forward(&x.0);
+        let pred = net.forward(x.0);
         println!(
             "{},{},{},{}",
             x.0[0],
