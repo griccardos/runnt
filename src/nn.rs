@@ -9,6 +9,8 @@ use ndarray::Array;
 use crate::activation::{activate, activate_der, ActivationType};
 use crate::dataset::Dataset;
 use crate::initialization::{calc_initialization, InitializationType};
+use crate::optimizer::Optimizer;
+use crate::optimizer::OptimizerType;
 use crate::regularization::Regularization;
 
 /// Struct holding Neural Net functionality
@@ -41,6 +43,7 @@ pub struct NN {
     output_type: ActivationType,
     regularization: Regularization,
     use_softmax_crossentropy: bool, //whether we have softmax in last layer, and using crossentropy loss
+    optimizer: Optimizer,
 }
 
 impl NN {
@@ -86,12 +89,17 @@ impl NN {
             output_type: ActivationType::Linear,
             regularization: Regularization::None,
             use_softmax_crossentropy: false,
+            optimizer: Optimizer::none(),
         };
         s.with_initialization(InitializationType::Random)
     }
 
     pub fn with_learning_rate(mut self, rate: f32) -> NN {
         self.learning_rate = rate;
+        self
+    }
+    pub fn with_optimizer(mut self, optimizer: OptimizerType) -> NN {
+        self.optimizer = Optimizer::new(optimizer, &self.weights, &self.bias);
         self
     }
 
@@ -157,7 +165,7 @@ impl NN {
     /// 2. Calculates output loss
     /// 3. Backprop to calculate gradient
     /// 4. Regularize
-    /// 5. Applies gradients to weights and biases
+    /// 5. Applies gradients to weights and biases using specified optimizer or learning rate if none
     /// # Panics
     /// If target's length does not match that of the network
     pub fn fit_batch(&mut self, inputs: &[&Vec<f32>], targets: &[&Vec<f32>]) {
@@ -172,10 +180,9 @@ impl NN {
         let values = self.internal_forward(&inputs_matrix);
         let outputs = values.activated.last().expect("There should be outputs");
         let loss = NN::output_loss(outputs, &targets_matrix);
-        let (mut weights, biases) = self.backwards(values, loss);
-        self.regularize(&mut weights);
-
-        self.apply_gradients(&weights, &biases);
+        let (mut weight_gradient, bias_gradient) = self.backwards(values, loss);
+        self.regularize(&mut weight_gradient);
+        self.apply_gradients(weight_gradient, bias_gradient);
     }
 
     /// Forward inputs into the network, and returns output result i.e. `prediction`
@@ -431,13 +438,19 @@ impl NN {
     ///Apply gradients to network using learning rate
     fn apply_gradients(
         &mut self,
-        weight_gradients: &[Array2<f32>],
-        bias_gradients: &[Array2<f32>],
+        weight_gradients: Vec<Array2<f32>>,
+        bias_gradients: Vec<Array2<f32>>,
     ) {
+        let (dw, db) = self.optimizer.calc_gradient_update(
+            weight_gradients,
+            bias_gradients,
+            self.learning_rate,
+        );
+
         let layers = self.shape.len();
         for l in 0..layers - 1 {
-            self.bias[l] = &self.bias[l] - &bias_gradients[l] * self.learning_rate;
-            self.weights[l] = &self.weights[l] - &weight_gradients[l] * self.learning_rate;
+            self.bias[l] = &self.bias[l] + &db[l];
+            self.weights[l] = &self.weights[l] + &dw[l];
         }
     }
 
@@ -502,7 +515,7 @@ impl NN {
             .split('\n')
             .filter_map(|x| {
                 x.split_once('=')
-                    .map(|(k,v)|vec![k.to_string(), v.to_string()])
+                    .map(|(k, v)| vec![k.to_string(), v.to_string()])
             })
             .collect();
 
@@ -814,14 +827,11 @@ fn to_matrix(vec: &[&Vec<f32>]) -> Array2<f32> {
     let rows = vec.len();
     let cols = vec[0].len();
     let mut data = Vec::with_capacity(rows * cols);
-    for r in vec{
+    for r in vec {
         data.extend_from_slice(r);
     }
-    Array2::from_shape_vec(
-        (vec.len(), vec[0].len()),
-        data
-    )
-    .expect("shape not allowed by size of vec")
+    Array2::from_shape_vec((vec.len(), vec[0].len()), data)
+        .expect("shape not allowed by size of vec")
 }
 
 pub struct TargetPredicted {
