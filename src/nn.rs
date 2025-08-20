@@ -44,6 +44,7 @@ pub struct NN {
     regularization: Regularization,
     use_softmax_crossentropy: bool, //whether we have softmax in last layer, and using crossentropy loss
     optimizer: Optimizer,
+    step: usize, //step for adam optimizer
 }
 
 impl NN {
@@ -90,6 +91,7 @@ impl NN {
             regularization: Regularization::None,
             use_softmax_crossentropy: false,
             optimizer: Optimizer::none(),
+            step: 0,
         };
         s.with_initialization(InitializationType::Random)
     }
@@ -182,7 +184,8 @@ impl NN {
         let loss = NN::output_loss(outputs, &targets_matrix);
         let (mut weight_gradient, bias_gradient) = self.backwards(values, loss);
         self.regularize(&mut weight_gradient);
-        self.apply_gradients(weight_gradient, bias_gradient);
+        self.step += 1;
+        self.apply_gradients(weight_gradient, bias_gradient, self.step);
     }
 
     /// Forward inputs into the network, and returns output result i.e. `prediction`
@@ -440,11 +443,13 @@ impl NN {
         &mut self,
         weight_gradients: Vec<Array2<f32>>,
         bias_gradients: Vec<Array2<f32>>,
+        step: usize,
     ) {
         let (dw, db) = self.optimizer.calc_gradient_update(
             weight_gradients,
             bias_gradients,
             self.learning_rate,
+            step,
         );
 
         let layers = self.shape.len();
