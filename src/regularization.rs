@@ -2,11 +2,27 @@ use std::fmt::Display;
 
 pub enum Regularization {
     None,
+    ///try 0.00001
     L1(f32),
+    ///try 0.0001
     L2(f32),
+    ///try 0.00001, 0.0001
     L1L2(f32, f32),
 }
 impl Regularization {
+    ///Uses default of 0.00001
+    pub fn l1() -> Regularization {
+        Regularization::L1(0.00001)
+    }
+    ///Uses default of 0.0001
+    pub fn l2() -> Regularization {
+        Regularization::L2(0.0001)
+    }
+    ///Uses defaults of 0.00001, 0.0001
+    pub fn l1l2() -> Regularization {
+        Regularization::L1L2(0.00001, 0.0001)
+    }
+
     pub(crate) fn from_str(line: &str) -> Regularization {
         if line == "None" {
             return Regularization::None;
