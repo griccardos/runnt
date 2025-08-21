@@ -1,17 +1,18 @@
+use ndarray::prelude::*;
+use ndarray::Array;
 use std::fmt::Display;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Instant;
 
-use ndarray::prelude::*;
-use ndarray::Array;
-
 use crate::activation::{activate, activate_der, ActivationType};
 use crate::dataset::Dataset;
+use crate::error::Error;
 use crate::initialization::{calc_initialization, InitializationType};
 use crate::optimizer::Optimizer;
 use crate::optimizer::OptimizerType;
 use crate::regularization::Regularization;
+use crate::sede::Sede;
 
 /// Struct holding Neural Net functionality
 ///```rust
@@ -37,14 +38,15 @@ use crate::regularization::Regularization;
 pub struct NN {
     weights: Vec<Array2<f32>>, // layer * 2D matrix e.g. [2x2], [2x1]
     bias: Vec<Array2<f32>>,    //layer * 2D matrix
-    shape: Vec<usize>,
     pub learning_rate: f32,
     hidden_type: ActivationType,
     output_type: ActivationType,
     regularization: Regularization,
     use_softmax_crossentropy: bool, //whether we have softmax in last layer, and using crossentropy loss
     optimizer: Optimizer,
-    step: usize, //step for adam optimizer
+
+    //not used, but stored for serialization
+    initialization: InitializationType,
 }
 
 impl NN {
@@ -81,8 +83,7 @@ impl NN {
             }
         }
 
-        let s = Self {
-            shape: Vec::from(network_shape),
+        let mut s = Self {
             weights,
             bias,
             learning_rate: 0.01,
@@ -91,9 +92,10 @@ impl NN {
             regularization: Regularization::None,
             use_softmax_crossentropy: false,
             optimizer: Optimizer::none(),
-            step: 0,
+            initialization: InitializationType::Random,
         };
-        s.with_initialization(InitializationType::Random)
+        s.reset_weights();
+        s
     }
 
     pub fn with_learning_rate(mut self, rate: f32) -> NN {
@@ -114,7 +116,8 @@ impl NN {
         self
     }
     pub fn with_initialization(mut self, typ: InitializationType) -> Self {
-        self.reset_weights(typ);
+        self.initialization = typ;
+        self.reset_weights();
         self
     }
 
@@ -130,12 +133,20 @@ impl NN {
         self
     }
 
-    pub fn reset_weights(&mut self, typ: InitializationType) {
-        let layers = self.shape.len();
+    pub fn shape(&self) -> Vec<usize> {
+        let mut shape = vec![self.weights[0].shape()[0]]; //input layer size
+        for w in &self.weights {
+            shape.push(w.shape()[1]); //next layer size
+        }
+        shape
+    }
+
+    pub fn reset_weights(&mut self) {
+        let layers = self.shape().len();
         for l in 0..layers - 1 {
-            let this_size = self.shape[l];
-            self.bias[l].mapv_inplace(|_| calc_initialization(typ, this_size));
-            self.weights[l].mapv_inplace(|_| calc_initialization(typ, this_size));
+            let this_size = self.shape()[l];
+            self.bias[l].mapv_inplace(|_| calc_initialization(self.initialization, this_size));
+            self.weights[l].mapv_inplace(|_| calc_initialization(self.initialization, this_size));
         }
     }
 
@@ -173,7 +184,7 @@ impl NN {
     pub fn fit_batch(&mut self, inputs: &[&Vec<f32>], targets: &[&Vec<f32>]) {
         assert_eq!(
             &targets[0].len(),
-            self.shape.last().unwrap(),
+            self.shape().last().unwrap(),
             "Target size does not match network output size"
         );
 
@@ -184,8 +195,7 @@ impl NN {
         let loss = NN::output_loss(outputs, &targets_matrix);
         let (mut weight_gradient, bias_gradient) = self.backwards(values, loss);
         self.regularize(&mut weight_gradient);
-        self.step += 1;
-        self.apply_gradients(weight_gradient, bias_gradient, self.step);
+        self.apply_gradients(weight_gradient, bias_gradient);
     }
 
     /// Forward inputs into the network, and returns output result i.e. `prediction`
@@ -287,7 +297,7 @@ impl NN {
     fn internal_forward(&self, input: &Array2<f32>) -> ValueAndActivated {
         assert_eq!(
             input.shape()[1],
-            self.shape[0],
+            self.shape()[0],
             "Input size does not equal first layer size"
         ); //columns = number of nodes in first layer
 
@@ -338,7 +348,7 @@ impl NN {
         values_and_activations: ValueAndActivated,
         output_gradient: Array2<f32>,
     ) -> (Vec<Array2<f32>>, Vec<Array2<f32>>) {
-        let layers = self.shape.len();
+        let layers = self.shape().len();
 
         //calc error by looking at last layer and comparing target vs actual
 
@@ -443,16 +453,14 @@ impl NN {
         &mut self,
         weight_gradients: Vec<Array2<f32>>,
         bias_gradients: Vec<Array2<f32>>,
-        step: usize,
     ) {
         let (dw, db) = self.optimizer.calc_gradient_update(
             weight_gradients,
             bias_gradients,
             self.learning_rate,
-            step,
         );
 
-        let layers = self.shape.len();
+        let layers = self.shape().len();
         for l in 0..layers - 1 {
             self.bias[l] = &self.bias[l] + &db[l];
             self.weights[l] = &self.weights[l] + &dw[l];
@@ -461,48 +469,8 @@ impl NN {
 
     ///Save to path
     pub fn save<P: AsRef<Path>>(&self, path: P) {
-        let mut vec = vec![];
-        vec.push(format!("learning_rate={}", self.learning_rate));
-        vec.push(format!("hidden_type={}", self.hidden_type));
-        vec.push(format!("output_type={}", self.output_type));
-        vec.push(format!("regularization={}", self.regularization));
-        vec.push(format!(
-            "softmax_crossentropy={}",
-            self.use_softmax_crossentropy
-        ));
-        vec.push(format!(
-            "shape={}",
-            self.shape
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        ));
-        let layers = self.shape.len();
-        for l in 0..layers - 1 {
-            let bias = &self.bias[l]
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(";");
-
-            vec.push(format!("bias={bias}"));
-
-            let weights = &self.weights[l]
-                .rows()
-                .into_iter()
-                .map(|x| {
-                    x.iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<String>>()
-                        .join(",")
-                })
-                .collect::<Vec<_>>()
-                .join(";");
-
-            vec.push(format!("weight={weights}"));
-        }
-        let result = std::fs::write(path.as_ref(), vec.join("\n"));
+        let str = self.serialize();
+        let result = std::fs::write(path.as_ref(), str);
         if let Err(err) = result {
             println!(
                 "Could not write file {:?}: {}",
@@ -512,89 +480,9 @@ impl NN {
         }
     }
     ///Load from file
-    /// # Panics
-    /// If cannot load file
-    pub fn load<P: AsRef<Path>>(path: P) -> Self {
-        let data: Vec<Vec<String>> = std::fs::read_to_string(path)
-            .expect("Could not load from file")
-            .split('\n')
-            .filter_map(|x| {
-                x.split_once('=')
-                    .map(|(k, v)| vec![k.to_string(), v.to_string()])
-            })
-            .collect();
-
-        let mut lr = 0.01f32;
-        let mut softmax_crossentropy = false;
-        let mut ht = ActivationType::Sigmoid;
-        let mut ot = ActivationType::Linear;
-        let mut reg = Regularization::None;
-        let mut weights: Vec<Array<f32, Ix2>> = vec![];
-        let mut biases: Vec<Array<f32, Ix2>> = vec![];
-        let mut network_shape = vec![];
-        for line in data {
-            if line[0] == "learning_rate" {
-                lr = line[1].parse::<f32>().unwrap_or(0.01);
-            } else if line[0] == "hidden_type" {
-                ht = ActivationType::from_str(&line[1]).unwrap_or(ActivationType::Sigmoid);
-            } else if line[0] == "output_type" {
-                ot = ActivationType::from_str(&line[1]).unwrap_or(ActivationType::Linear);
-            } else if line[0] == "regularization" {
-                reg = Regularization::from_str(&line[1]);
-            } else if line[0] == "softmax_crossentropy" {
-                softmax_crossentropy = line[1].parse::<bool>().unwrap_or_default();
-            } else if line[0] == "weight" {
-                let ww: Vec<Vec<f32>> = line[1]
-                    .split(';')
-                    .map(|x| {
-                        x.split(',')
-                            .filter_map(|f| f.parse::<f32>().ok())
-                            .collect::<Vec<f32>>()
-                    })
-                    .collect();
-                let r = ww.len();
-                let c = ww[0].len();
-                let ww = ww.iter().flatten().copied().collect::<Vec<f32>>();
-                let ww = Array2::from_shape_vec([r, c], ww).expect("Shape is wrong for vec");
-                weights.push(ww);
-            } else if line[0] == "bias" {
-                let bb = line[1]
-                    .split(';')
-                    .map(|f| f.parse::<f32>().unwrap_or_default())
-                    .collect::<Vec<f32>>();
-                let bb = Array2::from_shape_vec([1, bb.len()], bb).expect("Shape is wrong for vec");
-
-                biases.push(bb);
-            } else if line[0] == "shape" {
-                network_shape = line[1]
-                    .split(',')
-                    .map(|f| f.parse::<usize>().unwrap_or_default())
-                    .collect::<Vec<usize>>();
-            }
-        }
-
-        let mut weight_shape = vec![];
-        for l in &weights {
-            weight_shape.push(l.shape()[0]);
-        }
-        weight_shape.push(weights.last().expect("There should be weights").shape()[1]);
-
-        assert_eq!(
-            network_shape, weight_shape,
-            "Weight shape does not equal to shape"
-        );
-
-        let mut s = Self::new(&network_shape)
-            .with_hidden_type(ht)
-            .with_output_type(ot)
-            .with_regularization(reg)
-            .with_learning_rate(lr);
-
-        s.use_softmax_crossentropy = softmax_crossentropy;
-        s.weights = weights;
-        s.bias = biases;
-
-        s
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let data = std::fs::read_to_string(path)?;
+        Self::deserialize(&data)
     }
 
     ///Returns weights (including biases)
@@ -629,9 +517,6 @@ impl NN {
                 counter += 1;
             }
         }
-    }
-    pub fn get_shape(&self) -> Vec<usize> {
-        self.shape.clone()
     }
 
     /// Train with dataset
@@ -758,37 +643,106 @@ impl NN {
         acc_string
     }
 }
+impl Sede for NN {
+    fn serialize(&self) -> String {
+        let mut vec = vec![];
+        vec.push(format!("learning_rate={}", self.learning_rate));
+        vec.push(format!("hidden_type={}", self.hidden_type));
+        vec.push(format!("output_type={}", self.output_type));
+        vec.push(format!("regularization={}", self.regularization));
+        vec.push(format!(
+            "softmax_crossentropy={}",
+            self.use_softmax_crossentropy
+        ));
+        vec.push(format!("initialization={}", self.initialization));
+        vec.push(format!("optimizer={}", self.optimizer.serialize()));
+        vec.push(format!("bias={}", self.bias.serialize()));
+        vec.push(format!("weight={}", self.weights.serialize()));
+        vec.join("\n")
+    }
+
+    fn deserialize(s: &str) -> Result<Self, Error> {
+        let data = s
+            .split('\n')
+            .filter_map(|x| {
+                x.split_once('=')
+                    .map(|(k, v)| vec![k.to_string(), v.to_string()])
+            })
+            .collect::<Vec<Vec<String>>>();
+
+        let mut learning_rate = 0.01f32;
+        let mut use_softmax_crossentropy = false;
+        let mut hidden_type = ActivationType::Sigmoid;
+        let mut output_type = ActivationType::Linear;
+        let mut regularization = Regularization::None;
+        let mut initialization = InitializationType::Random;
+        let mut optimizer = Optimizer::none();
+        let mut weights: Vec<Array2<f32>> = vec![];
+        let mut bias: Vec<Array2<f32>> = vec![];
+        for line in data {
+            if line[0] == "learning_rate" {
+                learning_rate = line[1].parse::<f32>()?;
+            } else if line[0] == "hidden_type" {
+                hidden_type = ActivationType::from_str(&line[1])?;
+            } else if line[0] == "output_type" {
+                output_type = ActivationType::from_str(&line[1])?;
+            } else if line[0] == "regularization" {
+                regularization = Regularization::deserialize(&line[1])?;
+            } else if line[0] == "initialization" {
+                initialization = InitializationType::deserialize(&line[1])?;
+            } else if line[0] == "softmax_crossentropy" {
+                use_softmax_crossentropy = line[1].parse::<bool>().unwrap_or_default();
+            } else if line[0] == "optimizer" {
+                println!("opti");
+                optimizer = Optimizer::deserialize(&line[1])?;
+                println!("opti2");
+            } else if line[0] == "weight" {
+                weights = <Vec<Array2<f32>>>::deserialize(&line[1])?
+            } else if line[0] == "bias" {
+                bias = <Vec<Array2<f32>>>::deserialize(&line[1])?;
+            }
+        }
+        Ok(NN {
+            weights,
+            bias,
+            learning_rate,
+            hidden_type,
+            output_type,
+            regularization,
+            use_softmax_crossentropy,
+            optimizer,
+            initialization,
+        })
+    }
+}
 
 impl Display for NN {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut str = String::new();
-
-        str.push_str(
-            self.shape
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect::<Vec<String>>()
-                .join(", ")
-                .as_str(),
-        );
-
-        str.push_str("\nweights: \n");
-        let wei = &self.weights;
-        for l in wei {
-            str.push_str(l.to_string().as_str());
-            str.push('\n');
-        }
-        str.push('\n');
-
-        str.push_str("\nbiases: \n");
-        let wei = &self.bias;
-        for l in wei {
-            str.push_str(l.to_string().as_str());
-            str.push('\n');
-        }
-        str.push('\n');
-
-        write!(f, "{str}")
+        Ok(write!(
+            f,
+            r"
+Shape: {:?}
+Weights: {:?}
+Bias: {:?}
+Learning Rate: {}
+Initialization Type: {}
+Hidden Type: {}
+Output Type: {}
+Regularization: {}
+Use Softmax Crossentropy: {}
+Optimizer: {}
+",
+            self.shape(),
+            self.weights.iter().map(|w| w.shape()).collect::<Vec<_>>(),
+            self.bias.iter().map(|b| b.shape()).collect::<Vec<_>>(),
+            self.learning_rate,
+            self.initialization,
+            self.hidden_type,
+            self.output_type,
+            self.regularization,
+            self.use_softmax_crossentropy,
+            self.optimizer,
+        )?)
     }
 }
 

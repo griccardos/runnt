@@ -6,7 +6,16 @@ use tempfile::NamedTempFile;
 use crate::activation::ActivationType;
 use crate::initialization::InitializationType;
 use crate::nn::NN;
+use crate::optimizer::OptimizerType;
 use crate::regularization::Regularization;
+use crate::sede::Sede;
+
+#[test]
+fn test_shape() {
+    let nn = NN::new(&[2, 3, 4, 5]);
+    let shape = nn.shape();
+    assert_eq!(shape, vec![2, 3, 4, 5]);
+}
 
 #[test]
 /// Test xor nn against known outputs
@@ -74,7 +83,7 @@ fn xor_sgd() {
         let mut results: VecDeque<f32> = VecDeque::new();
 
         results.clear();
-        nn.reset_weights(InitializationType::Random);
+        nn.reset_weights();
         for steps in 0..20_000 {
             fastrand::shuffle(&mut inp_out);
             nn.fit_one(&inp_out[0].0, &inp_out[0].1);
@@ -122,7 +131,7 @@ fn xor_gd() {
         let mut results: VecDeque<f32> = VecDeque::new();
 
         results.clear();
-        nn.reset_weights(InitializationType::Random);
+        nn.reset_weights();
         for steps in 0..20_000 {
             fastrand::shuffle(&mut inp_out);
             let ins = vec![&inp_out[0].0, &inp_out[1].0];
@@ -205,7 +214,7 @@ fn readme() {
 
     let save_path = r"/temp/network.txt";
     let mut net = if std::path::PathBuf::from_str(save_path).unwrap().exists() {
-        NN::load(save_path)
+        NN::load(save_path).unwrap()
     } else {
         NN::new(&[set.input_size(), 32, set.target_size()])
     };
@@ -220,26 +229,33 @@ fn test_save_load() {
         .with_learning_rate(0.5)
         .with_regularization(Regularization::L1L2(0.1, 0.2))
         .with_hidden_type(ActivationType::Tanh)
-        .with_output_type(ActivationType::Relu);
+        .with_output_type(ActivationType::Relu)
+        .with_initialization(InitializationType::Fixed(0.5))
+        .with_optimizer(OptimizerType::adam());
 
     let input = [1., 2., 3., 4., 5., 6., 7., 8., 9., 10.];
-    let result1 = nn.forward(&input);
+    nn.forward(&input);
+    let result1 = nn.forward(&input); //forward twice
     let temp = NamedTempFile::new().unwrap();
     let path = temp.path();
 
     //test looks the same
     let orig = nn.get_weights();
-    let orig_shape = nn.get_shape();
-    println!("shape:{orig_shape:?} weights:{orig:?}");
+    let orig_shape = nn.shape();
+    println!("nn:{nn} ");
     nn.save(path);
-    let nn2 = NN::load(path);
+    let nn2 = NN::load(path).unwrap();
     let new = nn2.get_weights();
-    let new_shape = nn2.get_shape();
-    println!("shape:{new_shape:?} weights:{new:?}");
+    let new_shape = nn2.shape();
+    println!("nn loaded:{nn2} ");
     assert_eq!(orig_shape, new_shape);
     assert_eq!(orig, new);
+    assert_eq!(nn.serialize(), nn2.serialize());
+    assert_eq!(nn.get_weights(), nn2.get_weights());
+    assert_eq!(nn.bias, nn2.bias);
 
     //test result the same
+    nn2.forward(&input);
     let result2 = nn2.forward(&input);
     assert_eq!(result1, result2);
 }

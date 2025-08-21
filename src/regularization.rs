@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::{error::Error, sede::Sede};
+
 pub enum Regularization {
     None,
     ///try 0.00001
@@ -22,14 +24,16 @@ impl Regularization {
     pub fn l1l2() -> Regularization {
         Regularization::L1L2(0.00001, 0.0001)
     }
+}
 
-    pub(crate) fn from_str(line: &str) -> Regularization {
+impl Sede for Regularization {
+    fn deserialize(line: &str) -> Result<Self, Error> {
         if line == "None" {
-            return Regularization::None;
+            return Ok(Regularization::None);
         }
 
         if let Some((t, vs)) = line.split_once(':') {
-            return match (t, vs) {
+            let reg = match (t, vs) {
                 ("L1", vs) => Regularization::L1(vs.parse::<f32>().unwrap_or_default()),
                 ("L2", vs) => Regularization::L2(vs.parse::<f32>().unwrap_or_default()),
                 ("L1L2", vs) => {
@@ -45,8 +49,15 @@ impl Regularization {
 
                 _ => Regularization::None,
             };
+            return Ok(reg);
         }
-        Regularization::None
+        Err(Error::SerializationError(format!(
+            "Invalid regularization format: {line}"
+        )))
+    }
+
+    fn serialize(&self) -> String {
+        format!("{}", self)
     }
 }
 
