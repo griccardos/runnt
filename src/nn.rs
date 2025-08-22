@@ -276,6 +276,9 @@ impl NN {
             }
             Loss::BinaryCrossEntropy => {
                 // Binary cross-entropy: -Σ [ t*ln(a) + (1-t)*ln(1-a) ]
+                // where:
+                // - t is the target 0 or 1 for pure binary
+                // - a is the predicted probability after sigmoid.
                 let mut a = outputs.clone();
                 // clamp to [eps, 1-eps]
                 a.mapv_inplace(|v| v.max(eps).min(1.0 - eps));
