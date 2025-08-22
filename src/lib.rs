@@ -2,6 +2,7 @@ pub mod activation;
 pub mod dataset;
 pub mod error;
 pub mod initialization;
+pub mod loss;
 pub mod nn;
 pub mod optimizer;
 pub mod regularization;

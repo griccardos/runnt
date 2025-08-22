@@ -9,6 +9,7 @@ use crate::activation::{activate, activate_der, ActivationType};
 use crate::dataset::Dataset;
 use crate::error::Error;
 use crate::initialization::{calc_initialization, InitializationType};
+use crate::loss::Loss;
 use crate::optimizer::Optimizer;
 use crate::optimizer::OptimizerType;
 use crate::regularization::Regularization;
@@ -42,7 +43,7 @@ pub struct NN {
     hidden_type: ActivationType,
     output_type: ActivationType,
     regularization: Regularization,
-    use_softmax_crossentropy: bool, //whether we have softmax in last layer, and using crossentropy loss
+    loss: Loss,
     optimizer: Optimizer,
 
     //not used, but stored for serialization
@@ -90,7 +91,7 @@ impl NN {
             hidden_type: ActivationType::Sigmoid,
             output_type: ActivationType::Linear,
             regularization: Regularization::None,
-            use_softmax_crossentropy: false,
+            loss: Loss::MSE,
             optimizer: Optimizer::none(),
             initialization: InitializationType::Random,
         };
@@ -128,8 +129,8 @@ impl NN {
 
     /// Output Layer becomes softmax, and we calculate cross entropy error
     /// Often speeds up learning in classification
-    pub fn with_softmax_and_crossentropy(mut self) -> Self {
-        self.use_softmax_crossentropy = true;
+    pub fn with_loss(mut self, loss: Loss) -> Self {
+        self.loss = loss;
         self
     }
 
@@ -192,7 +193,7 @@ impl NN {
         let targets_matrix = to_matrix(targets);
         let values = self.internal_forward(&inputs_matrix);
         let outputs = values.activated.last().expect("There should be outputs");
-        let loss = NN::output_loss(outputs, &targets_matrix);
+        let loss = NN::output_loss_gradient(outputs, &targets_matrix);
         let (mut weight_gradient, bias_gradient) = self.backwards(values, loss);
         self.regularize(&mut weight_gradient);
         self.apply_gradients(weight_gradient, bias_gradient);
@@ -244,36 +245,51 @@ impl NN {
 
     ///calcs error based on outputs and target
     fn internal_calc_errors(&self, outputs: &Array2<f32>, target: &Array2<f32>) -> Vec<f32> {
-        if self.use_softmax_crossentropy {
-            //crossentopy
-            // E= - Sum(Ti Log(Si))
-            //Ti target value
-            //Si softmax value
-            let really_small = 0.0000001; //prevents log(0)
-            let mut err = outputs.mapv(|a| (a + really_small).ln());
-            err *= -1.;
-            err *= target;
-            let sums = err.sum_axis(Axis(1));
-            sums.to_vec()
-        } else {
-            //MSE
-            //E = error or loss
-            //a = forwarded value after activation
-            //t = target value
-            // E = 0.5* (t-a)^2
+        let eps = 1e-7f32; //prevents log(0)
 
-            let mut diff = target - outputs;
-            diff.mapv_inplace(|x| 0.5 * x.powi(2));
-            //now have a matrix of [example_count x output_size]
-            //we want sum of all output size so we get [example_count x 1]
+        match self.loss {
+            Loss::MSE => {
+                //MSE
+                //E = error or loss
+                //a = forwarded value after activation
+                //t = target value
+                // E = 0.5* (t-a)^2
 
-            let sums = diff.sum_axis(Axis(1));
-            sums.to_vec()
+                let mut diff = target - outputs;
+                diff.mapv_inplace(|x| 0.5 * x.powi(2));
+                //now have a matrix of [example_count x output_size]
+                //we want sum of all output size so we get [example_count x 1]
+
+                let sums = diff.sum_axis(Axis(1));
+                sums.to_vec()
+            }
+            Loss::SoftmaxAndCrossEntropy => {
+                //crossentopy
+                // E= - Sum(Ti Log(Si))
+                //Ti target value
+                //Si softmax value
+                let mut err = outputs.mapv(|a| (a + eps).ln());
+                err *= -1.;
+                err *= target;
+                let sums = err.sum_axis(Axis(1));
+                sums.to_vec()
+            }
+            Loss::BinaryCrossEntropy => {
+                // Binary cross-entropy: -Σ [ t*ln(a) + (1-t)*ln(1-a) ]
+                let mut a = outputs.clone();
+                // clamp to [eps, 1-eps]
+                a.mapv_inplace(|v| v.max(eps).min(1.0 - eps));
+                let term1 = target * &a.mapv(|x| x.ln());
+                let term2 = (1.0 - target) * &a.mapv(|x| (1.0 - x).ln());
+                let sum = -(term1 + term2);
+                let sums = sum.sum_axis(Axis(1));
+                sums.to_vec()
+            }
         }
     }
 
     /// calc gradient for each example
-    fn output_loss(outputs: &Array2<f32>, target: &Array2<f32>) -> Array2<f32> {
+    fn output_loss_gradient(outputs: &Array2<f32>, target: &Array2<f32>) -> Array2<f32> {
         //MSE LOSS
         //E = error / loss
         //a = value after activation
@@ -313,15 +329,33 @@ impl NN {
 
             //apply activation
             let ltype = self.get_layer_type(l);
-            act_sum.mapv_inplace(|a| activate(a, ltype));
 
-            //if softmax
             let is_last_layer = l == self.weights.len() - 1;
-            if is_last_layer && self.use_softmax_crossentropy {
-                act_sum.mapv_inplace(f32::exp); //calc e^val
-                let sums = act_sum.sum_axis(Axis(1)); //sum all rows
-                for (ri, mut r) in act_sum.rows_mut().into_iter().enumerate() {
-                    r.mapv_inplace(|a| a / sums[ri]);
+
+            if !is_last_layer {
+                //hidden layers
+                act_sum.mapv_inplace(|a| activate(a, ltype));
+            } else {
+                match self.loss {
+                    Loss::MSE => {
+                        act_sum.mapv_inplace(|a| activate(a, ltype));
+                    }
+                    Loss::SoftmaxAndCrossEntropy => {
+                        //avoid overflow by subtracting the max from each row
+                        for mut r in act_sum.rows_mut() {
+                            let max = r.iter().cloned().fold(f32::NEG_INFINITY, f32::max); //find max
+                            r.mapv_inplace(|a| a - max);
+                        }
+                        act_sum.mapv_inplace(f32::exp); //calc e^val
+                        let sums = act_sum.sum_axis(Axis(1)); //sum all rows
+                        for (ri, mut r) in act_sum.rows_mut().into_iter().enumerate() {
+                            r.mapv_inplace(|a| a / sums[ri]);
+                        }
+                    }
+                    Loss::BinaryCrossEntropy => {
+                        //apply sigmoid
+                        act_sum.mapv_inplace(|a| activate(a, ActivationType::Sigmoid));
+                    }
                 }
             }
 
@@ -334,10 +368,13 @@ impl NN {
 
     fn get_layer_type(&self, layer: usize) -> ActivationType {
         let is_last_layer = layer == self.weights.len() - 1;
-        match (is_last_layer, self.use_softmax_crossentropy) {
-            (false, _) => self.hidden_type,
-            (true, false) => self.output_type,
-            (true, true) => ActivationType::Linear, //we use softmax instead,
+        if !is_last_layer {
+            return self.hidden_type;
+        }
+        match self.loss {
+            Loss::MSE => self.output_type,
+            // Last layer: choose linear for these because for backward we don't want to activation derivative. We manually calculate the correct activation in forward
+            Loss::SoftmaxAndCrossEntropy | Loss::BinaryCrossEntropy => ActivationType::Linear,
         }
     }
 
@@ -650,10 +687,7 @@ impl Sede for NN {
         vec.push(format!("hidden_type={}", self.hidden_type));
         vec.push(format!("output_type={}", self.output_type));
         vec.push(format!("regularization={}", self.regularization));
-        vec.push(format!(
-            "softmax_crossentropy={}",
-            self.use_softmax_crossentropy
-        ));
+        vec.push(format!("loss={}", self.loss.serialize()));
         vec.push(format!("initialization={}", self.initialization));
         vec.push(format!("optimizer={}", self.optimizer.serialize()));
         vec.push(format!("bias={}", self.bias.serialize()));
@@ -671,7 +705,7 @@ impl Sede for NN {
             .collect::<Vec<Vec<String>>>();
 
         let mut learning_rate = 0.01f32;
-        let mut use_softmax_crossentropy = false;
+        let mut loss = Loss::MSE;
         let mut hidden_type = ActivationType::Sigmoid;
         let mut output_type = ActivationType::Linear;
         let mut regularization = Regularization::None;
@@ -690,8 +724,8 @@ impl Sede for NN {
                 regularization = Regularization::deserialize(&line[1])?;
             } else if line[0] == "initialization" {
                 initialization = InitializationType::deserialize(&line[1])?;
-            } else if line[0] == "softmax_crossentropy" {
-                use_softmax_crossentropy = line[1].parse::<bool>().unwrap_or_default();
+            } else if line[0] == "loss" {
+                loss = Loss::deserialize(&line[1])?;
             } else if line[0] == "optimizer" {
                 println!("opti");
                 optimizer = Optimizer::deserialize(&line[1])?;
@@ -709,7 +743,7 @@ impl Sede for NN {
             hidden_type,
             output_type,
             regularization,
-            use_softmax_crossentropy,
+            loss,
             optimizer,
             initialization,
         })
@@ -729,7 +763,7 @@ Initialization Type: {}
 Hidden Type: {}
 Output Type: {}
 Regularization: {}
-Use Softmax Crossentropy: {}
+Loss: {}
 Optimizer: {}
 ",
             self.shape(),
@@ -740,7 +774,7 @@ Optimizer: {}
             self.hidden_type,
             self.output_type,
             self.regularization,
-            self.use_softmax_crossentropy,
+            self.loss,
             self.optimizer,
         )?)
     }

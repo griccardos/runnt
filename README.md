@@ -11,16 +11,18 @@ You are welcome to raise an issue or PR if you identify any errors or optimisati
 - [X] minimal dependencies
 - [X] no external static libraries/dlls required
 - [X] regression and classfication
-- [X] able to define layers sizes
-- [X] able to define activation types
 - [X] can save/load model
 - [X] Stochastic, mini batch, gradient descent
-- [X] Regularisation
 - [X] Dataset manager 
     - [X] csv
     - [X] onehot encoding
     - [X] normalization 
 - [X] Reporting
+- [X] Losses MSE, BCE (binary), Softmax with Cross Entropy (multi class)
+- [X] Regularisation: L1, L2
+- [X] Activations: Linear, Sigmoid, Tanh, ReLU, Swish, Softmax
+- [X] Optimizers: SGD, Momentum, Adam
+
 
 ## How to use
 ### Simple example
