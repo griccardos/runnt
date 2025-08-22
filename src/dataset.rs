@@ -82,7 +82,7 @@ impl Dataset {
         inp.into_iter().zip(out).collect()
     }
 
-    fn get_shuffled_data(data: &[(Inputs, Targets)]) -> (Vec<& Inputs>, Vec<& Targets>) {
+    fn get_shuffled_data(data: &[(Inputs, Targets)]) -> (Vec<&Inputs>, Vec<&Targets>) {
         let mut indices = (0..data.len()).collect::<Vec<_>>();
         fastrand::shuffle(&mut indices);
         let mut vecin = vec![];
@@ -327,6 +327,21 @@ impl DatasetBuilder {
         }
         self
     }
+    pub fn add_target_column(
+        mut self,
+        index: usize,
+        pre_adjustment: fn(&str) -> String,
+        conversion: Conversion,
+    ) -> Self {
+        self.columns.push(Column {
+            index,
+            pre_adjustment: Some(pre_adjustment),
+            conversion,
+            location: Location::Target,
+        });
+
+        self
+    }
 
     pub fn build(&self) -> Dataset {
         self.asserts();
@@ -337,15 +352,9 @@ impl DatasetBuilder {
         let (traininputs, traintargets) = self.transform(&self.data, &col_stats);
         let (testinputs, testtargets) = self.transform(&self.test_data, &col_stats);
 
-        let data = traininputs
-            .into_iter()
-            .zip(traintargets)
-            .collect();
+        let data = traininputs.into_iter().zip(traintargets).collect();
 
-        let test_data = testinputs
-            .into_iter()
-            .zip(testtargets)
-            .collect();
+        let test_data = testinputs.into_iter().zip(testtargets).collect();
 
         Dataset {
             data,
@@ -569,7 +578,7 @@ impl DatasetBuilder {
 
         let mut hash = HashMap::new();
         for (i, str) in vals.iter().enumerate() {
-            let mut vec: Vec<f32> = std::iter::repeat_n(0.,vals.len()).collect();
+            let mut vec: Vec<f32> = std::iter::repeat_n(0., vals.len()).collect();
             vec[i] = 1.;
             hash.insert(str.clone(), vec);
         }
