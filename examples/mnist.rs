@@ -6,7 +6,10 @@ use std::{
 
 use runnt::{
     activation::ActivationType,
+    loss::Loss,
     nn::{max_index_equal, NN},
+    optimizer::OptimizerType,
+    regularization::Regularization,
 };
 //Classification example
 pub fn main() {
@@ -27,9 +30,11 @@ cargo run --release --example mnist -- /tmp/mnist
     }
 
     let mut nn = NN::new(&[784, 128, 10])
-        .with_hidden_type(ActivationType::Sigmoid)
-        .with_output_type(ActivationType::Sigmoid)
-        .with_learning_rate(0.15);
+        .with_hidden_type(ActivationType::Swish)
+        .with_loss(Loss::SoftmaxAndCrossEntropy)
+        .with_regularization(Regularization::L2(0.0001))
+        .with_optimizer(OptimizerType::adam())
+        .with_learning_rate(0.001);
 
     let path = &args[1];
     let tt = get_train_test(path);
@@ -73,14 +78,12 @@ fn get_acc_mse(nn: &NN, data: &[(Vec<f32>, Vec<f32>)]) -> (f32, f32) {
     let mean_acc = (sum as f32) / (data.len() as f32);
     (mean_acc, mse)
 }
-struct TrainTest{
+struct TrainTest {
     train: Vec<(Vec<f32>, Vec<f32>)>,
     test: Vec<(Vec<f32>, Vec<f32>)>,
 }
 
-fn get_train_test(
-    path: impl AsRef<Path>,
-) -> TrainTest {
+fn get_train_test(path: impl AsRef<Path>) -> TrainTest {
     // data can be downloaded from http://yann.lecun.com/exdb/mnist/
     // 2 train files, one for labels, one for images
     // 2 test files
