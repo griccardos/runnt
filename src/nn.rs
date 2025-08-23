@@ -564,7 +564,7 @@ impl NN {
     /// and reporting on each epoch
     /// 1. getting shuffled data and test data from Dataset
     /// 2. fitting data with batch size
-    /// 3. reporting train and test error
+    /// 3. reporting train and test error each N epochs. 0 for no reporting
     /// 4. Report metric applied to both train and test data
     pub fn train(
         &mut self,
@@ -580,12 +580,15 @@ impl NN {
             ReportMetric::CorrectClassification | ReportMetric::Custom(_) => " train_acc test_acc",
             ReportMetric::RSquared => " train_R² test R²",
         };
-        println!("epoch train_error test_error{acc} duration(s)");
+
+        if report_epoch > 0 {
+            println!("epoch train_error test_error{acc} duration(s)");
+        }
         for e in 1..=epochs {
             let (inp, tar) = set.get_data();
             self.fit(&inp, &tar, batch_size);
 
-            if report_epoch > 0 && e % report_epoch == 0 {
+            if report_epoch > 0 && (e % report_epoch == 0 || e == epochs) {
                 //get error
                 let train_err = self.forward_errors(&inp, &tar);
                 let (inp_test, tar_test) = set.get_test_data();

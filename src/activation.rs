@@ -61,9 +61,7 @@ impl FromStr for ActivationType {
             "Linear" => Ok(ActivationType::Linear),
             "Tanh" => Ok(ActivationType::Tanh),
             "Swish" => Ok(ActivationType::Swish),
-            _ => Err(std::io::Error::other(
-                "Unknown activation type",
-            )),
+            _ => Err(std::io::Error::other("Unknown activation type")),
         }
     }
 }
@@ -134,20 +132,29 @@ mod tests {
 
         let val = 100.;
         let a = activate(val, ActivationType::Swish);
-        let der=activate_der(val, a, ActivationType::Swish);
-        assert!((der - 1.0).abs() < 1e-6, "Swish derivative at large value should be close to 1, got {}", der);
-        
+        let der = activate_der(val, a, ActivationType::Swish);
+        assert!(
+            (der - 1.0).abs() < 1e-6,
+            "Swish derivative at large value should be close to 1, got {}",
+            der
+        );
+
         let val = -100.;
         let a = activate(val, ActivationType::Swish);
-        let der=activate_der(val, a, ActivationType::Swish);
-        assert!((der + 0.0).abs() < 1e-6, "Swish derivative at large negative value should be close to 0, got {}", der);
+        let der = activate_der(val, a, ActivationType::Swish);
+        assert!(
+            (der + 0.0).abs() < 1e-6,
+            "Swish derivative at large negative value should be close to 0, got {}",
+            der
+        );
 
-        let val=0.;
+        let val = 0.;
         let a = activate(val, ActivationType::Swish);
-        let der=activate_der(val, a, ActivationType::Swish);
-        assert!((der - 0.5).abs() < 1e-6,"Swish derivative at zero should be close to 0.5, got {}", der);
-
+        let der = activate_der(val, a, ActivationType::Swish);
+        assert!(
+            (der - 0.5).abs() < 1e-6,
+            "Swish derivative at zero should be close to 0.5, got {}",
+            der
+        );
     }
-
-
 }

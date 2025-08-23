@@ -32,22 +32,22 @@ pub fn main() {
 
     println!("x,y,tar,predicted");
     set.get_test_data_zip().iter().take(400).for_each(|x| {
-    let pred = nn.forward(x.0);
-    println!(
-        "{},{},{},{}",
-        x.0[0],
-        x.0[1],
-        max_index(x.1),
-        max_index(&pred),
-    );
-});
+        let pred = nn.forward(x.0);
+        println!(
+            "{},{},{},{}",
+            x.0[0],
+            x.0[1],
+            max_index(x.1),
+            max_index(&pred),
+        );
+    });
 }
 
 pub fn generate_moons() -> Vec<Vec<f32>> {
     //generate function which we want to predict
     let sine1 = |x: f32| (x * 2. + PI * 2. / 4.).sin() + fastrand::f32() / 2. - 0.2;
     let sine2 = |x: f32| (x * 2. + PI * 4. / 4.).sin() + fastrand::f32() / 2. - 0.2;
-    
+
     //get some observations
     let mut inp_out = vec![];
     //moon1 from -1 to 1
@@ -65,4 +65,4 @@ pub fn generate_moons() -> Vec<Vec<f32>> {
         inp_out.push(vec![x, y, cat]);
     });
     inp_out
-    }
+}

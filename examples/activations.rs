@@ -1,4 +1,6 @@
-use runnt::{activation::ActivationType, dataset::Dataset, initialization::InitializationType, nn::NN};
+use runnt::{
+    activation::ActivationType, dataset::Dataset, initialization::InitializationType, nn::NN,
+};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::time::Instant;
@@ -25,7 +27,7 @@ pub fn main() {
 
     const EPOCHS: usize = 1000;
     const BATCH_SIZE: usize = 1;
-    const LEARNING_RATE: f32 = 0.05; 
+    const LEARNING_RATE: f32 = 0.05;
 
     let mut per_epoch = OpenOptions::new()
         .create(true)
@@ -51,7 +53,11 @@ pub fn main() {
 
     let mut all_mses: Vec<Vec<f32>> = Vec::with_capacity(activations.len());
 
-    writeln!(summary, "activation,epochs,final_train_mse,final_test_mse,time_seconds").unwrap();
+    writeln!(
+        summary,
+        "activation,epochs,final_train_mse,final_test_mse,time_seconds"
+    )
+    .unwrap();
 
     for &act in &activations {
         let mut net = NN::new(&[1, 8, 8, 1])
@@ -83,7 +89,12 @@ pub fn main() {
         let elapsed = start.elapsed().as_secs_f32();
         all_mses.push(mse_series);
 
-        writeln!(summary, "{},{},{:.8},{:.8},{:.4}", act, EPOCHS, final_train_mse, final_test_mse, elapsed).unwrap();
+        writeln!(
+            summary,
+            "{},{},{:.8},{:.8},{:.4}",
+            act, EPOCHS, final_train_mse, final_test_mse, elapsed
+        )
+        .unwrap();
         println!(
             "Activation {} completed: epochs={} final_train_mse={:.8} final_test_mse={:.8} time(s)={:.4}",
             act,
