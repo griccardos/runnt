@@ -129,10 +129,13 @@ impl NN {
         self
     }
 
-    /// Output Layer becomes softmax, and we calculate cross entropy error
-    /// Often speeds up learning in classification
+    /// Set the loss function.
     ///
-    /// Overrides `with_output_type`
+    /// Typically it will be `MSE` for regression problems,
+    /// `SoftmaxAndCrossEntropy` for multi-class classification problems,
+    /// `BinaryCrossEntropy` for binary classification problems.
+    ///
+    /// Overrides `with_output_type` for both CrossEntropy types
     pub fn with_loss(mut self, loss: Loss) -> Self {
         self.loss = loss;
         self
