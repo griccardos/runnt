@@ -537,3 +537,66 @@ fn compare_mse_vs_bce_xor() {
     println!("Avg BCE steps: {}", bce_avg);
     assert!(bce_avg < mse_avg);
 }
+
+#[test]
+fn test_label_smoothing_scales_gradients() {
+    // smoothing should scale gradients by (1 - r).
+    let k = 3usize;
+    let rate = 0.1f32;
+    let mut nn = NN::new(&[1, k]).with_loss(Loss::SoftmaxAndCrossEntropy);
+
+    let zeros = vec![0f32; 2 * k];
+    nn.set_weights(&zeros);
+
+    let input = arr2(&[[1.0f32]]);
+    let vals = nn.internal_forward(&input);
+    let outputs = vals.activated.last().unwrap().clone();
+
+    let mut target_vec = vec![0f32; k];
+    target_vec[0] = 1.0;
+    let target = Array2::from_shape_vec((1, k), target_vec.clone()).unwrap();
+
+    let mut smoothed_vec = vec![rate / (k as f32); k];
+    smoothed_vec[0] = 1.0 - rate + rate / (k as f32);
+    let smoothed = Array2::from_shape_vec((1, k), smoothed_vec).unwrap();
+
+    // compute gradients (dE/dA) for both targets
+    let grad_no = NN::output_loss_gradient(&outputs, &target);
+    let grad_smooth = NN::output_loss_gradient(&outputs, &smoothed);
+
+    // compute weight gradients via backwards
+    let (wgrads_no, _b_no) = nn.backwards(vals.clone(), grad_no);
+    let (wgrads_s, _b_s) = nn.backwards(vals, grad_smooth);
+
+    let expected_factor = 1.0 - rate;
+
+    // check that each weight gradient equals scaled version
+    // e.g. -0.66 in non smooth will be -0.66*0.9=-0.6 in smoothed
+    let eps = 1e-6;
+    let gno = &wgrads_no[0];
+    let gs = &wgrads_s[0];
+    for (x, y) in gno.iter().zip(gs.iter()) {
+        assert!((y - x * expected_factor).abs() < eps);
+    }
+}
+
+#[test]
+fn test_label_smoothing_changes_training_update() {
+    let mut nn_no_smooth = NN::new(&[1, 3]).with_loss(Loss::SoftmaxAndCrossEntropy);
+    let mut nn_smooth = NN::new(&[1, 3])
+        .with_loss(Loss::SoftmaxAndCrossEntropy)
+        .with_label_smoothing(0.1);
+
+    let initial_weights = vec![0.0f32; 6]; // 1*3 weights + 3 bias
+    nn_no_smooth.set_weights(&initial_weights);
+    nn_smooth.set_weights(&initial_weights);
+
+    let input = [1.0f32];
+    let target = [1.0f32, 0.0f32, 0.0f32];
+
+    nn_no_smooth.fit_one(&input, &target);
+    nn_smooth.fit_one(&input, &target);
+
+    // weights should differ because smoothing changes the effective target
+    assert_ne!(nn_no_smooth.get_weights(), nn_smooth.get_weights());
+}

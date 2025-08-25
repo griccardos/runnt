@@ -45,6 +45,7 @@ pub struct NN {
     regularization: Regularization,
     loss: Loss,
     optimizer: Optimizer,
+    label_smoothing: Option<f32>,
 
     //not used, but stored for serialization
     initialization: InitializationType,
@@ -94,6 +95,7 @@ impl NN {
             loss: Loss::MSE,
             optimizer: Optimizer::none(),
             initialization: InitializationType::Random,
+            label_smoothing: None,
         };
         s.reset_weights();
         s
@@ -131,6 +133,22 @@ impl NN {
     /// Often speeds up learning in classification
     pub fn with_loss(mut self, loss: Loss) -> Self {
         self.loss = loss;
+        self
+    }
+    /// Smooths labels for one hot encoded values.
+    ///
+    /// Typically One hot has multiple outputs with one set to 1 and rest to zero.
+    /// Smoothing decreases the 1 and allocates to the other labels, "smoothing" the targets  
+    /// e.g. `[1,0,0]` becomes `[0.8,0.1,0.1]`.
+    /// This helps avoiding huge gradient spikes.  
+    ///
+    /// A good default is 0.1
+    pub fn with_label_smoothing(mut self, rate: f32) -> Self {
+        assert!(
+            rate >= 0. && rate < 1.,
+            "Label smoothing rate must be in range [0,1)"
+        );
+        self.label_smoothing = Some(rate);
         self
     }
 
@@ -189,10 +207,25 @@ impl NN {
             "Target size does not match network output size"
         );
 
+        //smoothing labels if set
+        let new_targets = match self.label_smoothing {
+            Some(rate) => targets
+                .iter()
+                .map(|a| {
+                    a.iter()
+                        .map(|v| v * (1. - rate) + rate / (targets[0].len() as f32))
+                        .collect()
+                })
+                .collect::<Vec<Vec<f32>>>(),
+            None => targets.iter().map(|a| a.to_vec()).collect(),
+        };
+        let targets = &new_targets.iter().map(|a| a).collect::<Vec<&Vec<f32>>>();
+
         let inputs_matrix = to_matrix(inputs);
         let targets_matrix = to_matrix(targets);
         let values = self.internal_forward(&inputs_matrix);
         let outputs = values.activated.last().expect("There should be outputs");
+
         let loss = NN::output_loss_gradient(outputs, &targets_matrix);
         let (mut weight_gradient, bias_gradient) = self.backwards(values, loss);
         self.regularize(&mut weight_gradient);
@@ -698,6 +731,13 @@ impl Sede for NN {
         vec.push(format!("optimizer={}", self.optimizer.serialize()));
         vec.push(format!("bias={}", self.bias.serialize()));
         vec.push(format!("weight={}", self.weights.serialize()));
+        vec.push(format!(
+            "label_smoothing={}",
+            match self.label_smoothing {
+                Some(a) => format!("{a}"),
+                None => "None".to_string(),
+            }
+        ));
         vec.join("\n")
     }
 
@@ -716,6 +756,7 @@ impl Sede for NN {
         let mut output_type = ActivationType::Linear;
         let mut regularization = Regularization::None;
         let mut initialization = InitializationType::Random;
+        let mut label_smoothing = None;
         let mut optimizer = Optimizer::none();
         let mut weights: Vec<Array2<f32>> = vec![];
         let mut bias: Vec<Array2<f32>> = vec![];
@@ -730,6 +771,11 @@ impl Sede for NN {
                 regularization = Regularization::deserialize(&line[1])?;
             } else if line[0] == "initialization" {
                 initialization = InitializationType::deserialize(&line[1])?;
+            } else if line[0] == "label_smoothing" {
+                label_smoothing = match line[1].as_str() {
+                    "None" => None,
+                    _ => Some(line[1].parse()?),
+                };
             } else if line[0] == "loss" {
                 loss = Loss::deserialize(&line[1])?;
             } else if line[0] == "optimizer" {
@@ -752,6 +798,7 @@ impl Sede for NN {
             loss,
             optimizer,
             initialization,
+            label_smoothing,
         })
     }
 }
@@ -870,6 +917,7 @@ pub enum ReportMetric {
     Custom(CustomMetric),
 }
 
+#[derive(Clone)]
 struct ValueAndActivated {
     ///holds the output values Z=(WxI)
     values: Vec<Array2<f32>>,
