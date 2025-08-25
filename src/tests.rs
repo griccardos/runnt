@@ -70,7 +70,7 @@ fn xor_bce() {
     let mut nn = NN::new(&[2, 8, 1])
         .with_learning_rate(0.1)
         .with_hidden_type(ActivationType::Sigmoid)
-        .with_output_type(ActivationType::Sigmoid);
+        .with_loss(Loss::BinaryCrossEntropy);
 
     let mut inp_out = [
         ([0., 0.], [0.]),

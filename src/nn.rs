@@ -94,7 +94,7 @@ impl NN {
             regularization: Regularization::None,
             loss: Loss::MSE,
             optimizer: Optimizer::none(),
-            initialization: InitializationType::Random,
+            initialization: InitializationType::Xavier,
             label_smoothing: None,
         };
         s.reset_weights();
@@ -131,6 +131,8 @@ impl NN {
 
     /// Output Layer becomes softmax, and we calculate cross entropy error
     /// Often speeds up learning in classification
+    ///
+    /// Overrides `with_output_type`
     pub fn with_loss(mut self, loss: Loss) -> Self {
         self.loss = loss;
         self
@@ -164,8 +166,11 @@ impl NN {
         let layers = self.shape().len();
         for l in 0..layers - 1 {
             let this_size = self.shape()[l];
-            self.bias[l].mapv_inplace(|_| calc_initialization(self.initialization, this_size));
-            self.weights[l].mapv_inplace(|_| calc_initialization(self.initialization, this_size));
+            let next_size = self.shape()[l + 1];
+            self.bias[l]
+                .mapv_inplace(|_| calc_initialization(self.initialization, this_size, next_size));
+            self.weights[l]
+                .mapv_inplace(|_| calc_initialization(self.initialization, this_size, next_size));
         }
     }
 
@@ -755,7 +760,7 @@ impl Sede for NN {
         let mut hidden_type = ActivationType::Sigmoid;
         let mut output_type = ActivationType::Linear;
         let mut regularization = Regularization::None;
-        let mut initialization = InitializationType::Random;
+        let mut initialization = InitializationType::Xavier;
         let mut label_smoothing = None;
         let mut optimizer = Optimizer::none();
         let mut weights: Vec<Array2<f32>> = vec![];

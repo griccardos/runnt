@@ -6,6 +6,7 @@ use std::{
 
 use runnt::{
     activation::ActivationType,
+    initialization::InitializationType,
     loss::Loss,
     nn::{max_index_equal, NN},
     optimizer::OptimizerType,
@@ -32,6 +33,7 @@ cargo run --release --example mnist -- /tmp/mnist
     let mut nn = NN::new(&[784, 128, 10])
         .with_hidden_type(ActivationType::Swish)
         .with_loss(Loss::SoftmaxAndCrossEntropy)
+        .with_initialization(InitializationType::He)
         .with_regularization(Regularization::L2(0.0001))
         .with_optimizer(OptimizerType::adam())
         .with_learning_rate(0.001);

@@ -63,7 +63,7 @@ pub fn main() {
         let mut net = NN::new(&[1, 8, 8, 1])
             .with_hidden_type(act)
             .with_output_type(ActivationType::Sigmoid)
-            .with_initialization(InitializationType::Xavier)
+            .with_initialization(InitializationType::He)
             .with_learning_rate(LEARNING_RATE);
 
         let mut mse_series: Vec<f32> = Vec::with_capacity(EPOCHS);
