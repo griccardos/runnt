@@ -23,9 +23,9 @@ use crate::sede::Sede;
 ///    let outputs = [[0.], [1.], [1.], [0.]];
 ///
 ///        let mut nn = NN::new(&[2, 8, 1])
-///        .with_learning_rate(0.2)
+///        .with_learning_rate(0.25)
 ///        .with_hidden_type(ActivationType::Tanh)
-///        .with_output_type(ActivationType::Linear);
+///        .with_output_type(ActivationType::Sigmoid);
 ///
 ///
 ///    for i in 0..5000 {
@@ -162,13 +162,14 @@ impl NN {
         shape
     }
 
+    ///Initialize weights based on `InitializationType`
+    ///Bias becomes zero
     pub fn reset_weights(&mut self) {
         let layers = self.shape().len();
         for l in 0..layers - 1 {
             let this_size = self.shape()[l];
             let next_size = self.shape()[l + 1];
-            self.bias[l]
-                .mapv_inplace(|_| calc_initialization(self.initialization, this_size, next_size));
+            self.bias[l].mapv_inplace(|_| 0.);
             self.weights[l]
                 .mapv_inplace(|_| calc_initialization(self.initialization, this_size, next_size));
         }
@@ -563,7 +564,7 @@ impl NN {
         Self::deserialize(&data)
     }
 
-    ///Returns weights (including biases)
+    ///Returns weights
     pub fn get_weights(&self) -> Vec<f32> {
         let mut weights = vec![];
 
@@ -572,17 +573,31 @@ impl NN {
             for i in &self.weights[l] {
                 weights.push(*i);
             }
-            for i in &self.bias[l] {
-                weights.push(*i);
-            }
         }
         weights
     }
 
-    ///Sets weights (including biases)
+    ///Returns biases
+    pub fn get_biases(&self) -> Vec<f32> {
+        let mut biases = vec![];
+
+        //for each layer...
+        for l in 0..self.bias.len() {
+            for i in &self.bias[l] {
+                biases.push(*i);
+            }
+        }
+        biases
+    }
+
+    ///Sets weights
     /// Uses output of `get_weights`
-    /// Format: layer1weights,layer1biases,layer2weights,layer2biases etc...
+    /// Format: layer1weights,layer2weights etc...
     pub fn set_weights(&mut self, weights: &[f32]) {
+        assert!(
+            weights.len() == self.weights.iter().map(|a| a.len()).sum::<usize>(),
+            "Weights length does not match network size"
+        );
         let mut counter = 0;
 
         for l in 0..self.weights.len() {
@@ -590,8 +605,18 @@ impl NN {
                 *i = weights[counter];
                 counter += 1;
             }
+        }
+    }
+
+    ///Sets biases
+    /// Uses output of `get_biases`
+    /// Format: layer1biases,layer2biases etc...
+    pub fn set_bias(&mut self, biases: &[f32]) {
+        let mut counter = 0;
+
+        for l in 0..self.bias.len() {
             for i in self.bias[l].iter_mut() {
-                *i = weights[counter];
+                *i = biases[counter];
                 counter += 1;
             }
         }
