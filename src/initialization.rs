@@ -4,9 +4,15 @@ use crate::{error::Error, sede::Sede};
 
 #[derive(Clone, Copy)]
 pub enum InitializationType {
-    /// Best for tanh, sigmoid (default)
+    /// Uniform initialization of weights between `+-sqrt(6/(in+out))`
+    ///
+    /// Best for Tanh, Sigmoid
+    ///
+    /// This is the default initialization
     Xavier,
-    /// Best for Relu, swish
+    /// Uniform initialization of weights between `+-sqrt(6/in)`
+    ///
+    /// Best for Relu, Swish
     He,
     /// set all weights the same
     Fixed(f32),
