@@ -1,14 +1,14 @@
-use ndarray::prelude::*;
 use ndarray::Array;
+use ndarray::prelude::*;
 use std::fmt::Display;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Instant;
 
-use crate::activation::{activate, activate_der, ActivationType};
+use crate::activation::{ActivationType, activate, activate_der};
 use crate::dataset::Dataset;
 use crate::error::Error;
-use crate::initialization::{calc_initialization, InitializationType};
+use crate::initialization::{InitializationType, calc_initialization};
 use crate::loss::Loss;
 use crate::optimizer::Optimizer;
 use crate::optimizer::OptimizerType;
@@ -46,6 +46,7 @@ pub struct NN {
     loss: Loss,
     optimizer: Optimizer,
     label_smoothing: Option<f32>,
+    dropout: Option<f32>,
 
     //not used, but stored for serialization
     initialization: InitializationType,
@@ -96,6 +97,7 @@ impl NN {
             optimizer: Optimizer::none(),
             initialization: InitializationType::Xavier,
             label_smoothing: None,
+            dropout: None,
         };
         s.reset_weights();
         s
@@ -154,6 +156,17 @@ impl NN {
             "Label smoothing rate must be in range [0,1)"
         );
         self.label_smoothing = Some(rate);
+        self
+    }
+
+    /// Dropout rate for hidden layers.
+    /// A good default is 0.1
+    pub fn with_dropout(mut self, rate: f32) -> Self {
+        assert!(
+            rate > 0. && rate < 1.,
+            "Dropout rate must be in range (0,1)"
+        );
+        self.dropout = Some(rate);
         self
     }
 
@@ -218,25 +231,20 @@ impl NN {
 
         //smoothing labels if set
         let new_targets = match self.label_smoothing {
-            Some(rate) => targets
-                .iter()
-                .map(|a| {
-                    a.iter()
-                        .map(|v| v * (1. - rate) + rate / (targets[0].len() as f32))
-                        .collect()
-                })
-                .collect::<Vec<Vec<f32>>>(),
+            Some(rate) => smooth_labels(targets, rate),
             None => targets.iter().map(|a| a.to_vec()).collect(),
         };
         let targets = &new_targets.iter().map(|a| a).collect::<Vec<&Vec<f32>>>();
+        //calc dropout mask
+        let dropout_mask = dropout(self.dropout, &self.shape());
 
         let inputs_matrix = to_matrix(inputs);
         let targets_matrix = to_matrix(targets);
-        let values = self.internal_forward(&inputs_matrix);
+        let values = self.internal_forward(&inputs_matrix, &dropout_mask);
         let outputs = values.activated.last().expect("There should be outputs");
 
         let loss = NN::output_loss_gradient(outputs, &targets_matrix);
-        let (mut weight_gradient, bias_gradient) = self.backwards(values, loss);
+        let (mut weight_gradient, bias_gradient) = self.backwards(values, loss, &dropout_mask);
         self.regularize(&mut weight_gradient);
         self.apply_gradients(weight_gradient, bias_gradient);
     }
@@ -244,7 +252,7 @@ impl NN {
     /// Forward inputs into the network, and returns output result i.e. `prediction`
     pub fn forward(&self, input: &[f32]) -> Vec<f32> {
         let inputs = to_matrix(&[&input.to_vec()]);
-        let values = self.internal_forward(&inputs);
+        let values = self.internal_forward(&inputs, &None);
         let vals = values.activated.last().expect("There should be outputs");
         //now return the values as a vec
         vals.flatten().to_vec()
@@ -269,7 +277,7 @@ impl NN {
 
     fn internal_forward_errors(&self, inputs: &Array2<f32>, targets: &Array2<f32>) -> f32 {
         let count = inputs.shape()[0];
-        let vals = self.internal_forward(inputs);
+        let vals = self.internal_forward(inputs, &None);
         let outs = vals.activated.last().expect("There should be outputs");
         let errs = self.internal_calc_errors(outs, targets);
         errs.iter().sum::<f32>() / count as f32
@@ -350,12 +358,16 @@ impl NN {
         outputs - target
     }
 
-    /// convert to array, and forward, returning batch values for each layer
+    /// Forward inputs into the network, returning both values before activation and after activation
     /// each input example is in a different row
-    /// each value is in a different column
+    /// each input value is in a different column
     /// so for 32 examples in a 10 node layer we have 32x10 matrix
     /// if softmax, we convert last layer
-    fn internal_forward(&self, input: &Array2<f32>) -> ValueAndActivated {
+    fn internal_forward(
+        &self,
+        input: &Array2<f32>,
+        dropout_mask: &Option<Vec<Array1<f32>>>,
+    ) -> ValueAndActivated {
         assert_eq!(
             input.shape()[1],
             self.shape()[0],
@@ -380,6 +392,10 @@ impl NN {
             if !is_last_layer {
                 //hidden layers
                 act_sum.mapv_inplace(|a| activate(a, ltype));
+                //apply dropout if set
+                if let Some(mask) = dropout_mask {
+                    act_sum *= &mask[l];
+                }
             } else {
                 match self.loss {
                     Loss::MSE => {
@@ -429,6 +445,7 @@ impl NN {
         &self,
         values_and_activations: ValueAndActivated,
         output_gradient: Array2<f32>,
+        dropout_mask: &Option<Vec<Array1<f32>>>,
     ) -> (Vec<Array2<f32>>, Vec<Array2<f32>>) {
         let layers = self.shape().len();
 
@@ -469,12 +486,26 @@ impl NN {
             let mut da_dz: Array2<f32> = next_activations.clone();
             for e in 0..example_count {
                 for n in 0..number_count {
-                    da_dz[[e, n]] =
-                        activate_der(next_values[(e, n)], next_activations[(e, n)], ltype);
+                    if dropout_mask.is_none() {
+                        //use already calculated activations (speeds up because we dont recalc activation)
+                        da_dz[[e, n]] =
+                            activate_der(next_values[(e, n)], next_activations[(e, n)], ltype);
+                    } else {
+                        //we need to recalculate activation from Z otherwise we will be using the scales/dropped out values which is incorrect
+                        let unmasked_activation = activate(next_values[(e, n)], ltype);
+                        da_dz[[e, n]] =
+                            activate_der(next_values[(e, n)], unmasked_activation, ltype);
+                    }
                 }
             }
             //dA/dZ
-            let de_dz = &next_layer_error_deriv * &da_dz; //dE/dA * dA/dZ = dE/dZ
+            let mut de_dz = &next_layer_error_deriv * &da_dz; //dE/dA * dA/dZ = dE/dZ
+            //apply dropout if set
+            if let Some(mask) = dropout_mask {
+                if l < mask.len() {
+                    de_dz *= &mask[l];
+                }
+            }
 
             //here error_grad_bias is numberexamples x size. But we only keep the sum so make 1xsize
             let ones: Array2<f32> = Array2::ones((1, example_count));
@@ -752,6 +783,46 @@ impl NN {
         acc_string
     }
 }
+/// Create dropout masks for each hidden layer (excludes input and output layer)
+/// Use same mask for each example in the entire batch
+fn dropout(
+    dropout: Option<f32>,
+    shape: &[usize], //input,hidden...,output
+) -> Option<Vec<Array1<f32>>> {
+    let dropout = dropout?;
+    Some(
+        shape
+            .iter()
+            .skip(1) //skip input layer
+            .take(shape.len() - 2) //skip output layer
+            .map(|&s| {
+                let mask = (0..s)
+                    .map(|_| {
+                        //keep with prob 1-dropout
+                        if fastrand::f32() < dropout {
+                            0.
+                        } else {
+                            1. / (1. - dropout) //scale up to keep expected value the same
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                Array1::from(mask)
+            })
+            .collect(),
+    )
+}
+
+fn smooth_labels(targets: &[&Vec<f32>], rate: f32) -> Vec<Vec<f32>> {
+    targets
+        .iter()
+        .map(|a| {
+            a.iter()
+                .map(|v| v * (1. - rate) + rate / (targets[0].len() as f32))
+                .collect()
+        })
+        .collect::<Vec<Vec<f32>>>()
+}
 impl Sede for NN {
     fn serialize(&self) -> String {
         let mut vec = vec![];
@@ -790,6 +861,7 @@ impl Sede for NN {
         let mut regularization = Regularization::None;
         let mut initialization = InitializationType::Xavier;
         let mut label_smoothing = None;
+        let mut dropout = None;
         let mut optimizer = Optimizer::none();
         let mut weights: Vec<Array2<f32>> = vec![];
         let mut bias: Vec<Array2<f32>> = vec![];
@@ -806,6 +878,11 @@ impl Sede for NN {
                 initialization = InitializationType::deserialize(&line[1])?;
             } else if line[0] == "label_smoothing" {
                 label_smoothing = match line[1].as_str() {
+                    "None" => None,
+                    _ => Some(line[1].parse()?),
+                };
+            } else if line[0] == "dropout" {
+                dropout = match line[1].as_str() {
                     "None" => None,
                     _ => Some(line[1].parse()?),
                 };
@@ -832,6 +909,7 @@ impl Sede for NN {
             optimizer,
             initialization,
             label_smoothing,
+            dropout,
         })
     }
 }
@@ -950,7 +1028,7 @@ pub enum ReportMetric {
     Custom(CustomMetric),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ValueAndActivated {
     ///holds the output values Z=(WxI)
     values: Vec<Array2<f32>>,

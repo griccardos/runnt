@@ -1,7 +1,7 @@
 [package]
 name = "runnt"
 version = "0.8.0"
-edition = "2021"
+edition = "2024"
 license = "MIT"
 description = "Easy Neural Network for machine learning"
 repository = "https://github.com/griccardos/runnt/"
@@ -14,10 +14,10 @@ fastrand = "2.3" #for random
 ndarray = "0.16" #for matrix
 
 [dev-dependencies]
-criterion = "0" #for bench
-tempfile = "3"  #for test
-ratatui = "0.20" #for moons tui example
-crossterm = "0.27"  #for moons tui example
+criterion = "0"    #for bench
+tempfile = "3"     #for test
+ratatui = "0.20"   #for moons tui example
+crossterm = "0.27" #for moons tui example
 
 [[bench]]
 name = "iterations"

@@ -1,12 +1,12 @@
 use std::collections::VecDeque;
 
-use ndarray::{arr2, Array2};
+use ndarray::{Array2, arr2};
 use tempfile::NamedTempFile;
 
 use crate::activation::ActivationType;
 use crate::initialization::InitializationType;
 use crate::loss::Loss;
-use crate::nn::NN;
+use crate::nn::{NN, dropout};
 use crate::optimizer::OptimizerType;
 use crate::regularization::Regularization;
 use crate::sede::Sede;
@@ -287,7 +287,7 @@ fn test_softmax_splits_even() {
         .with_initialization(InitializationType::Fixed(1.))
         .with_loss(crate::loss::Loss::SoftmaxAndCrossEntropy);
     let test = arr2(&[[5.], [3.]]); //they should all have the same weight so 0.25
-    let out = nn.internal_forward(&test);
+    let out = nn.internal_forward(&test, &None);
     let out = out.activated.last().unwrap();
     for row in out.rows() {
         assert_eq!(row.to_vec(), [0.25, 0.25, 0.25, 0.25]);
@@ -298,7 +298,7 @@ fn test_softmax_splits_even() {
 fn test_softmax_sums_to_one() {
     let nn = NN::new(&[1, 10, 8]).with_loss(crate::loss::Loss::SoftmaxAndCrossEntropy);
     let test = arr2(&[[5.], [3.]]);
-    let out = nn.internal_forward(&test);
+    let out = nn.internal_forward(&test, &None);
     let out = out.activated.last().unwrap();
     for row in out.rows() {
         let sum = row.sum();
@@ -358,7 +358,7 @@ fn test_loss_and_backprop_mse() {
     let target = arr2(&[[1.0]]); // shape (1 x 1)
 
     // forward
-    let vals = nn.internal_forward(&input);
+    let vals = nn.internal_forward(&input, &None);
     let outputs = vals.activated.last().unwrap().clone(); // (1 x 1) -> a = 0 because weights/bias = 0
 
     // check internal_calc_errors (MSE) = 0.5 * (t - a)^2 = 0.5
@@ -367,7 +367,7 @@ fn test_loss_and_backprop_mse() {
 
     // check output_loss (dE/dA) and backwards gradient:
     let loss_grad = NN::output_loss_gradient(&outputs, &target); // should be a - t = -1
-    let (wgrads, _bgrads) = nn.backwards(vals, loss_grad);
+    let (wgrads, _bgrads) = nn.backwards(vals, loss_grad, &None);
 
     // expected weight gradient for single example:
     // de/dz = a - t = -1
@@ -389,7 +389,7 @@ fn test_loss_and_backprop_softmax_crossentropy() {
     let target = arr2(&[[1.0, 0.0, 0.0]]); // (1 x 3)
 
     // forward: with zero pre-activations, softmax -> uniform probabilities 1/3
-    let vals = nn.internal_forward(&input);
+    let vals = nn.internal_forward(&input, &None);
     let outputs = vals.activated.last().unwrap().clone();
     for &p in outputs.row(0).iter() {
         // each probability must be approx 1/3
@@ -403,7 +403,7 @@ fn test_loss_and_backprop_softmax_crossentropy() {
 
     // Now check gradients:
     let loss_grad = NN::output_loss_gradient(&outputs, &target); // a - t = [1/3 - 1, 1/3, 1/3]
-    let (wgrads, _bgrads) = nn.backwards(vals, loss_grad);
+    let (wgrads, _bgrads) = nn.backwards(vals, loss_grad, &None);
 
     // For input [1,0,0], expected weight gradient matrix shape (3 x 3):
     // first row should be (a - t), other rows zero
@@ -430,7 +430,7 @@ fn test_loss_and_backprop_binary_crossentropy() {
     let target = arr2(&[[1.0]]); // (1 x 1)
 
     // forward: z = 0 -> sigmoid(z) = 0.5
-    let vals = nn.internal_forward(&input);
+    let vals = nn.internal_forward(&input, &None);
     let outputs = vals.activated.last().unwrap().clone();
     assert!((outputs[[0, 0]] - 0.5).abs() < 1e-6);
 
@@ -441,7 +441,7 @@ fn test_loss_and_backprop_binary_crossentropy() {
 
     // gradients: output_loss = a - t = -0.5
     let loss_grad = NN::output_loss_gradient(&outputs, &target);
-    let (wgrads, _bgrads) = nn.backwards(vals, loss_grad);
+    let (wgrads, _bgrads) = nn.backwards(vals, loss_grad, &None);
 
     // expected weight gradient = input^T * (a - t) => [[-0.5], [-1.0]]
     let expected = arr2(&[[-0.5], [-1.0]]);
@@ -529,7 +529,7 @@ fn test_label_smoothing_scales_gradients() {
     nn.set_weights(&zeros);
 
     let input = arr2(&[[1.0f32]]);
-    let vals = nn.internal_forward(&input);
+    let vals = nn.internal_forward(&input, &None);
     let outputs = vals.activated.last().unwrap().clone();
 
     let mut target_vec = vec![0f32; k];
@@ -545,8 +545,8 @@ fn test_label_smoothing_scales_gradients() {
     let grad_smooth = NN::output_loss_gradient(&outputs, &smoothed);
 
     // compute weight gradients via backwards
-    let (wgrads_no, _b_no) = nn.backwards(vals.clone(), grad_no);
-    let (wgrads_s, _b_s) = nn.backwards(vals, grad_smooth);
+    let (wgrads_no, _b_no) = nn.backwards(vals.clone(), grad_no, &None);
+    let (wgrads_s, _b_s) = nn.backwards(vals, grad_smooth, &None);
 
     let expected_factor = 1.0 - rate;
 
@@ -579,4 +579,109 @@ fn test_label_smoothing_changes_training_update() {
 
     // weights should differ because smoothing changes the effective target
     assert_ne!(nn_no_smooth.get_weights(), nn_smooth.get_weights());
+}
+#[test]
+fn test_dropout_masks() {
+    fastrand::seed(2);
+
+    let nn = NN::new(&[2, 20, 3]);
+    let dropout_rate = 0.2;
+    let masks_opt = dropout(Some(dropout_rate), &nn.shape());
+    assert!(masks_opt.is_some());
+    let masks = masks_opt.unwrap();
+
+    // there should be only mask on hidden layer
+    assert_eq!(masks.len(), nn.shape().len() - 2);
+
+    // intermediate (first) mask values must be only 0.0 or scaled
+    let first_mask = &masks[0];
+    for &v in first_mask.iter() {
+        assert!(v == 0.0f32 || v == 1.0f32 / (1.0 - dropout_rate));
+    }
+
+    // we expect at least one 0 and one scaled
+    let zero_count = first_mask.iter().filter(|&&x| x == 0.0f32).count();
+    let non_zero_count = first_mask.iter().filter(|&&x| x != 0.0f32).count();
+    println!("masks: {:?}", masks);
+    assert!(zero_count > 0);
+    assert!(non_zero_count > 0);
+
+    // ensure None returns None
+    assert!(dropout(None, &nn.shape()).is_none());
+}
+#[test]
+fn test_dropout_forward_and_backward_masking() {
+    fastrand::seed(2);
+
+    let mut nn = NN::new(&[2, 4, 1]).with_loss(Loss::MSE);
+    let dropout_rate = 0.5f32;
+    let masks = dropout(Some(dropout_rate), &nn.shape()).expect("should produce masks");
+
+    // set all weights to 1.0 so pre-activation is deterministic (z = sum(inputs*1))
+    let total_w: usize = nn.weights.iter().map(|w| w.len()).sum();
+    nn.set_weights(&vec![1.0f32; total_w]);
+
+    // single example with inputs [1, 1] -> z_hidden = 1*1 + 1*1 = 2.0 for each hidden unit
+    let input = arr2(&[[1.0f32, 1.0f32]]);
+
+    let vals = nn.internal_forward(&input, &Some(masks.clone()));
+    let hidden_activ = vals.activated.get(1).expect("hidden layer exists");
+    let mask_vec = &masks[0];
+    println!("hidden activations: {:?}", hidden_activ);
+    println!("mask: {:?}", mask_vec);
+
+    // compute expected unmasked activation for sigmoid(2.0)
+    let z = 2.0f32;
+    let expected_unmasked = 1.0f32 / (1.0f32 + (-z).exp());
+    let eps = 1e-6f32;
+
+    // check forward masking/scaling
+    for j in 0..mask_vec.len() {
+        let actual = hidden_activ[[0, j]];
+        if mask_vec[j] == 0.0f32 {
+            assert!(actual == 0., "node {j} should be dropped, got {actual}");
+        } else {
+            let expected = expected_unmasked * mask_vec[j];
+            assert!(
+                (actual - expected).abs() < eps,
+                "node {j} expected {expected} got {actual}"
+            );
+        }
+    }
+
+    // Now test backward: gradients for dropped units should be zero.
+    // Use a target of zero for simple gradient (output - target)
+    let outputs = vals.activated.last().unwrap().clone();
+    println!("outputs: {:?}", outputs);
+    let targets = arr2(&[[0.0f32]]);
+    let loss_grad = NN::output_loss_gradient(&outputs, &targets);
+    println!("loss grad: {:?}", loss_grad);
+
+    let (wgrads, bgrads) = nn.backwards(vals.clone(), loss_grad, &Some(masks.clone()));
+    println!("weight grads: {:?}", wgrads);
+
+    // First layer gradients correspond to input->hidden (shape: inputs x hidden)
+    let w0 = &wgrads[0];
+    let b0 = &bgrads[0]; // shape 1 x hidden
+
+    for j in 0..mask_vec.len() {
+        // check column j of weight gradient (all input rows) and bias gradient
+        let col_zero = w0.column(j).iter().all(|&v| v.abs() < eps);
+        let bias_zero = (b0[[0, j]]).abs() < eps;
+
+        if mask_vec[j] == 0.0f32 {
+            assert!(
+                col_zero,
+                "weight gradients for dropped unit {j} should be zero"
+            );
+            assert!(
+                bias_zero,
+                "bias gradient for dropped unit {j} should be zero"
+            );
+        } else {
+            let any_nonzero =
+                w0.column(j).iter().any(|&v| v.abs() > eps) || (b0[[0, j]].abs() > eps);
+            assert!(any_nonzero, "active unit {j} should have non-zero gradient");
+        }
+    }
 }
