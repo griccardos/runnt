@@ -1,21 +1,17 @@
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Style},
     symbols,
     widgets::{Axis, Block, Borders, Chart, Dataset as RtDataset, Paragraph, Wrap},
-    Terminal,
 };
-use runnt::{
-    activation::ActivationType,
-    dataset::Dataset as RnDataset,
-    nn::{max_index, ReportMetric},
-};
+use runnt::{activation::ActivationType, dataset::Dataset as RnDataset, nn::ReportMetric};
 use std::{error::Error, io, time::Duration, time::Instant};
 
 // copy of generate_moons from examples/moons.rs
@@ -48,15 +44,16 @@ fn build_and_run() -> (Vec<(f64, f64, i32, i32)>, String) {
         .add_data(&inp_out)
         .allocate_to_test_data(0.2)
         .add_input_columns(&[0, 1], runnt::dataset::Conversion::F32)
-        .add_target_columns(&[2], runnt::dataset::Conversion::OneHot)
+        .add_target_columns(&[2], runnt::dataset::Conversion::F32)
         .build();
 
     let mut nn = runnt::nn::NN::new(&[set.input_size(), 8, set.target_size()])
         .with_hidden_type(ActivationType::Sigmoid)
         .with_output_type(ActivationType::Linear)
+        .with_loss(runnt::loss::Loss::BinaryCrossEntropy)
         .with_learning_rate(0.05);
     let (inp_test, tar_test) = set.get_test_data();
-    nn.train(&set, 80, 1, 0, ReportMetric::CorrectClassification);
+    nn.train(&set, 20, 1, 0, ReportMetric::CorrectClassification);
     let log = format!(
         "Correct classifiction: {} (Try rerunning to see changes)",
         nn.report(&ReportMetric::CorrectClassification, &inp_test, &tar_test)
@@ -67,8 +64,8 @@ fn build_and_run() -> (Vec<(f64, f64, i32, i32)>, String) {
         let pred = nn.forward(x.0);
         let tx = x.0[0] as f64;
         let ty = x.0[1] as f64;
-        let tar = max_index(x.1) as i32;
-        let pr = max_index(&pred) as i32;
+        let tar = if x.1[0] as i32 > 0 { 1 } else { 0 };
+        let pr = if pred[0] > 0.5 { 1 } else { 0 };
         pts.push((tx, ty, tar, pr));
     }
 

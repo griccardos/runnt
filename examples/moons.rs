@@ -1,10 +1,6 @@
-use std::{f32::consts::PI, time::Duration};
+use std::f32::consts::PI;
 
-use runnt::{
-    activation::ActivationType,
-    dataset::Dataset,
-    nn::{max_index, ReportMetric},
-};
+use runnt::{activation::ActivationType, dataset::Dataset, nn::ReportMetric};
 
 // Example: Classification, dataset, train
 pub fn main() {
@@ -16,31 +12,17 @@ pub fn main() {
         .add_data(&inp_out)
         .allocate_to_test_data(0.2)
         .add_input_columns(&[0, 1], runnt::dataset::Conversion::F32)
-        .add_target_columns(&[2], runnt::dataset::Conversion::OneHot)
+        .add_target_columns(&[2], runnt::dataset::Conversion::F32)
         .build();
 
     //Create Neural Network
     let mut nn = runnt::nn::NN::new(&[set.input_size(), 8, set.target_size()])
         .with_hidden_type(ActivationType::Sigmoid)
         .with_output_type(ActivationType::Linear)
-        .with_learning_rate(0.5); //Learning rate
+        .with_loss(runnt::loss::Loss::BinaryCrossEntropy)
+        .with_learning_rate(0.1); //Learning rate
 
-    nn.train(&set, 100, 1, 10, ReportMetric::CorrectClassification);
-
-    println!("Generating test data to plot...");
-    std::thread::sleep(Duration::from_secs(2));
-
-    println!("x,y,tar,predicted");
-    set.get_test_data_zip().iter().take(400).for_each(|x| {
-        let pred = nn.forward(x.0);
-        println!(
-            "{},{},{},{}",
-            x.0[0],
-            x.0[1],
-            max_index(x.1),
-            max_index(&pred),
-        );
-    });
+    nn.train(&set, 20, 1, 1, ReportMetric::CorrectClassification);
 }
 
 pub fn generate_moons() -> Vec<Vec<f32>> {
