@@ -726,13 +726,36 @@ impl NN {
             ReportMetric::None => {}
             ReportMetric::CorrectClassification => {
                 let mut count = 0;
-                for (inp, tar) in inp.iter().zip(tar) {
-                    let pred = self.forward(inp);
-                    if max_index_equal(tar, &pred) {
-                        count += 1;
+
+                match self.loss {
+                    Loss::MSE => {} //not valid
+                    Loss::SoftmaxAndCrossEntropy => {
+                        for (inp, tar) in inp.iter().zip(tar) {
+                            let pred = self.forward(inp);
+                            if max_index_equal(tar, &pred) {
+                                count += 1;
+                            }
+                        }
+                    }
+                    Loss::BinaryCrossEntropy => {
+                        //if value>0.5 = 1 else 0 for binary cross entropy
+                        //add 1 if all outputs match
+                        for (inp, tar) in inp.iter().zip(tar) {
+                            let pred = self.forward(inp);
+                            let mut all_correct = true;
+                            for (p, t) in pred.iter().zip(tar.iter()) {
+                                let p = if *p > 0.5 { 1. } else { 0. };
+                                if (p - *t).abs() > f32::EPSILON {
+                                    all_correct = false;
+                                    break;
+                                }
+                            }
+                            if all_correct {
+                                count += 1;
+                            }
+                        }
                     }
                 }
-
                 let t_acc = count as f32 / inp.len() as f32 * 100.;
                 acc_string = format!("{t_acc:.2}%");
             }
