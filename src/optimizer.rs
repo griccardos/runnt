@@ -179,9 +179,9 @@ impl Optimizer {
 
                     // Update weights and biases
                     weight_gradients[l] =
-                        weight_m / (weight_v.mapv(|x| x.sqrt()) + 1e-8) * -learning_rate;
+                        weight_m / (weight_v.mapv(|x| x.sqrt()) + 1e-7) * -learning_rate;
                     bias_gradients[l] =
-                        bias_m / (bias_v.mapv(|x| x.sqrt()) + 1e-8) * -learning_rate;
+                        bias_m / (bias_v.mapv(|x| x.sqrt()) + 1e-7) * -learning_rate;
                 }
             }
         }
