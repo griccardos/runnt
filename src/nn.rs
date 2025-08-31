@@ -243,7 +243,7 @@ impl NN {
         let values = self.internal_forward(&inputs_matrix, &dropout_mask);
         let outputs = values.activated.last().expect("There should be outputs");
 
-        let loss = NN::output_loss_gradient(outputs, &targets_matrix);
+        let loss = self.loss.gradient(outputs, &targets_matrix);
         let (mut weight_gradient, bias_gradient) = self.backwards(values, loss, &dropout_mask);
         self.regularize(&mut weight_gradient);
         self.apply_gradients(weight_gradient, bias_gradient);
@@ -339,23 +339,6 @@ impl NN {
                 sums.to_vec()
             }
         }
-    }
-
-    /// calc gradient for each example
-    fn output_loss_gradient(outputs: &Array2<f32>, target: &Array2<f32>) -> Array2<f32> {
-        //MSE LOSS
-        //E = error / loss
-        //a = value after activation
-        //t = target value
-
-        // E = 0.5* (t-a)^2
-        // error gradient: dE/da = -1*2*0.5*(t-a) = -(t-a)=a-t
-
-        //SOFTMAX+CROSS ENTROPY LOSS
-        // softmax and together with crossentropy derivative
-        // conveniently is also output-target (same as mse loss)
-
-        outputs - target
     }
 
     /// Forward inputs into the network, returning both values before activation and after activation
@@ -645,7 +628,7 @@ impl NN {
     ///Sets biases
     /// Uses output of `get_biases`
     /// Format: layer1biases,layer2biases etc...
-    pub fn set_bias(&mut self, biases: &[f32]) {
+    pub fn set_biases(&mut self, biases: &[f32]) {
         let mut counter = 0;
 
         for l in 0..self.bias.len() {

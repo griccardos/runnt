@@ -55,12 +55,12 @@ impl FromStr for ActivationType {
     type Err = std::io::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "Relu" => Ok(ActivationType::Relu),
-            "Sigmoid" => Ok(ActivationType::Sigmoid),
-            "Linear" => Ok(ActivationType::Linear),
-            "Tanh" => Ok(ActivationType::Tanh),
-            "Swish" => Ok(ActivationType::Swish),
+        match s.to_lowercase().as_str() {
+            "relu" => Ok(ActivationType::Relu),
+            "sigmoid" => Ok(ActivationType::Sigmoid),
+            "linear" => Ok(ActivationType::Linear),
+            "tanh" => Ok(ActivationType::Tanh),
+            "swish" | "silu" => Ok(ActivationType::Swish),
             _ => Err(std::io::Error::other("Unknown activation type")),
         }
     }

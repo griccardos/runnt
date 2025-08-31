@@ -277,7 +277,7 @@ fn test_get_set_bias() {
     //the result before and after should be the same if set with the same weights
     let mut nn = NN::new(&[2, 2, 2]);
     let bias = vec![1., 2., 3., 4.];
-    nn.set_bias(&bias);
+    nn.set_biases(&bias);
     assert_eq!(&bias, &nn.get_biases());
 }
 
@@ -366,7 +366,7 @@ fn test_loss_and_backprop_mse() {
     assert!((errs[0] - 0.5).abs() < 1e-6);
 
     // check output_loss (dE/dA) and backwards gradient:
-    let loss_grad = NN::output_loss_gradient(&outputs, &target); // should be a - t = -1
+    let loss_grad = nn.loss.gradient(&outputs, &target); // should be a - t = -1
     let (wgrads, _bgrads) = nn.backwards(vals, loss_grad, &None);
 
     // expected weight gradient for single example:
@@ -402,7 +402,7 @@ fn test_loss_and_backprop_softmax_crossentropy() {
     assert!((errs[0] - expected_loss).abs() < 1e-6);
 
     // Now check gradients:
-    let loss_grad = NN::output_loss_gradient(&outputs, &target); // a - t = [1/3 - 1, 1/3, 1/3]
+    let loss_grad = nn.loss.gradient(&outputs, &target); // a - t = [1/3 - 1, 1/3, 1/3]
     let (wgrads, _bgrads) = nn.backwards(vals, loss_grad, &None);
 
     // For input [1,0,0], expected weight gradient matrix shape (3 x 3):
@@ -423,7 +423,7 @@ fn test_loss_and_backprop_binary_crossentropy() {
 
     // set weights  (2 weights )
     nn.set_weights(&[0.0, 0.0]);
-    nn.set_bias(&[0.]);
+    nn.set_biases(&[0.]);
 
     // single example input and binary target = 1
     let input = arr2(&[[1.0, 2.0]]); // (1 x 2)
@@ -440,7 +440,7 @@ fn test_loss_and_backprop_binary_crossentropy() {
     assert!((errs[0] - expected_loss).abs() < 1e-6);
 
     // gradients: output_loss = a - t = -0.5
-    let loss_grad = NN::output_loss_gradient(&outputs, &target);
+    let loss_grad = nn.loss.gradient(&outputs, &target);
     let (wgrads, _bgrads) = nn.backwards(vals, loss_grad, &None);
 
     // expected weight gradient = input^T * (a - t) => [[-0.5], [-1.0]]
@@ -541,8 +541,8 @@ fn test_label_smoothing_scales_gradients() {
     let smoothed = Array2::from_shape_vec((1, k), smoothed_vec).unwrap();
 
     // compute gradients (dE/dA) for both targets
-    let grad_no = NN::output_loss_gradient(&outputs, &target);
-    let grad_smooth = NN::output_loss_gradient(&outputs, &smoothed);
+    let grad_no = nn.loss.gradient(&outputs, &target);
+    let grad_smooth = nn.loss.gradient(&outputs, &smoothed);
 
     // compute weight gradients via backwards
     let (wgrads_no, _b_no) = nn.backwards(vals.clone(), grad_no, &None);
@@ -654,7 +654,7 @@ fn test_dropout_forward_and_backward_masking() {
     let outputs = vals.activated.last().unwrap().clone();
     println!("outputs: {:?}", outputs);
     let targets = arr2(&[[0.0f32]]);
-    let loss_grad = NN::output_loss_gradient(&outputs, &targets);
+    let loss_grad = nn.loss.gradient(&outputs, &targets);
     println!("loss grad: {:?}", loss_grad);
 
     let (wgrads, bgrads) = nn.backwards(vals.clone(), loss_grad, &Some(masks.clone()));

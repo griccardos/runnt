@@ -142,12 +142,12 @@ impl Optimizer {
                 }
                 OptimizerInternal::Momentum(momentum) => {
                     momentum.weight_velocity[l] = &momentum.weight_velocity[l] * momentum.beta
-                        + &weight_gradients[l] * -learning_rate;
+                        - &weight_gradients[l] * learning_rate;
 
                     weight_gradients[l] = momentum.weight_velocity[l].clone();
 
                     momentum.bias_velocity[l] = &momentum.bias_velocity[l] * momentum.beta
-                        + &bias_gradients[l] * -learning_rate;
+                        - &bias_gradients[l] * learning_rate;
 
                     bias_gradients[l] = momentum.bias_velocity[l].clone();
                 }
@@ -275,7 +275,7 @@ impl Sede for Optimizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::{array, Array2};
+    use ndarray::{Array2, array};
 
     fn approx_eq(a: &Array2<f32>, b: &Array2<f32>, eps: f32) -> bool {
         a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() < eps)
