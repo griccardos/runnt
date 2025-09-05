@@ -167,7 +167,7 @@ impl Optimizer {
 
                     // Compute bias-corrected first moment estimate
                     let weight_m =
-                        &adam.weight_velocity1[l] / (1.0 - adam.beta1.powi(adam.step as i32)); // assuming t=2 for simplicity
+                        &adam.weight_velocity1[l] / (1.0 - adam.beta1.powi(adam.step as i32));
                     let bias_m =
                         &adam.bias_velocity1[l] / (1.0 - adam.beta1.powi(adam.step as i32));
 
