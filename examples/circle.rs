@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use runnt::{
     dataset::{Conversion, Dataset},
-    nn::{self, ReportMetric, NN},
+    loss::Loss,
+    nn::{self, NN, ReportMetric},
 };
 
 //Example of: Classification, Dataset, train, report
@@ -29,16 +30,19 @@ pub fn main() {
     //convert to dataset
     let set = Dataset::builder()
         .add_data(&data)
-        .allocate_to_test_data(0.2)
+        .allocate_to_test_data(0.1)
         .add_input_columns_range(0..=1, Conversion::F32)
         .add_target_columns(&[2], Conversion::OneHot)
         .build();
 
     //create network
-    let mut net = NN::new(&[set.input_size(), 16, set.target_size()]).with_learning_rate(0.03);
+    let mut net = NN::new(&[set.input_size(), 16, 8, set.target_size()])
+        .with_learning_rate(0.01)
+        .with_loss(Loss::MSE) //typically it would be BinaryCrossEntropy for classification, but we will try regression
+        .with_hidden_type(runnt::activation::ActivationType::Tanh);
 
     //run reporting the mse
-    net.train(&set, 500, 1, 50, ReportMetric::CorrectClassification);
+    net.train(&set, 500, 16, 50, ReportMetric::RSquared); //use Classification if using BCE
     println!("Generating test data to plot...");
     std::thread::sleep(Duration::from_secs(2));
     println!("x,y,tar,predicted");
