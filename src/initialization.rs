@@ -105,8 +105,9 @@ mod tests {
         assert!((var - 0.3333).abs() < 0.05, "variance off: {}", var);
 
         // ensure values fall within [-1,1]
-        assert!(vals
-            .iter()
-            .all(|&v| v >= -1.0 - f32::EPSILON && v <= 1.0 + f32::EPSILON));
+        assert!(
+            vals.iter()
+                .all(|&v| v >= -1.0 - f32::EPSILON && v <= 1.0 + f32::EPSILON)
+        );
     }
 }

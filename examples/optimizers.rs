@@ -94,11 +94,7 @@ pub fn main() {
         .unwrap();
         println!(
             "Optimizer {} completed: epochs={} final_train_mse={:.8} final_test_mse={:.8} time(s)={:.4}",
-            op,
-            EPOCHS,
-            final_train_mse,
-            final_test_mse,
-            elapsed
+            op, EPOCHS, final_train_mse, final_test_mse, elapsed
         );
     }
 

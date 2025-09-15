@@ -8,10 +8,11 @@ use runnt::{
     activation::ActivationType,
     initialization::InitializationType,
     loss::Loss,
-    nn::{max_index_equal, NN},
+    nn::{NN, max_index, max_index_equal},
     optimizer::OptimizerType,
     regularization::Regularization,
 };
+
 //Classification example
 pub fn main() {
     fastrand::seed(1);
@@ -45,7 +46,7 @@ cargo run --release --example mnist -- /tmp/mnist
 
     let start = Instant::now();
 
-    for epoch in 1..20 {
+    for epoch in 1..5 {
         fastrand::shuffle(&mut training);
 
         let inputs = training.iter().map(|x| &x.0).collect::<Vec<_>>();
@@ -62,6 +63,8 @@ cargo run --release --example mnist -- /tmp/mnist
             start.elapsed().as_secs_f32()
         );
     }
+    // Interactive scroll through test examples
+    scroll_through_examples(&nn, &test);
 }
 
 fn get_acc_mse(nn: &NN, data: &[(Vec<f32>, Vec<f32>)]) -> (f32, f32) {
@@ -181,4 +184,43 @@ fn load_image_label(
     );
 
     data_result.into_iter().zip(label_result).collect()
+}
+// Render a 28x28 MNIST image as ASCII art
+fn print_mnist_ascii(image: &[f32]) {
+    let shades = [' ', '.', ':', '-', '=', '+', '*', '#', '%', '@'];
+    for y in 0..28 {
+        for x in 0..28 {
+            let v = image[y * 28 + x];
+            let idx = (v * (shades.len() as f32 - 1.0)).round() as usize;
+            print!("{}", shades[idx]);
+        }
+        println!("");
+    }
+}
+
+// Scroll through test examples interactively
+fn scroll_through_examples(nn: &NN, test: &[(Vec<f32>, Vec<f32>)]) {
+    use std::io::{self, Write};
+    let mut idx = 0;
+    loop {
+        let (input, label) = &test[idx];
+        let pred = nn.forward(input);
+        let pred_digit = max_index(&pred);
+        let actual_digit = max_index(label);
+        print_mnist_ascii(input);
+        println!("Predicted: {}", pred_digit);
+        println!("Actual:    {}", actual_digit);
+        print!("[Enter]=next,  q=quit: ");
+        io::stdout().flush().unwrap();
+        let mut buf = String::new();
+        io::stdin().read_line(&mut buf).unwrap();
+        let cmd = buf.trim();
+        if cmd == "q" {
+            break;
+        } else {
+            if idx + 1 < test.len() {
+                idx += 1;
+            }
+        }
+    }
 }

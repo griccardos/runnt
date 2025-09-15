@@ -580,6 +580,10 @@ impl NN {
         let data = std::fs::read_to_string(path)?;
         Self::deserialize(&data)
     }
+    ///Load from string
+    pub fn load_str(str: &str) -> Result<Self, Error> {
+        Self::deserialize(str)
+    }
 
     ///Returns weights
     pub fn get_weights(&self) -> Vec<f32> {

@@ -97,11 +97,7 @@ pub fn main() {
         .unwrap();
         println!(
             "Activation {} completed: epochs={} final_train_mse={:.8} final_test_mse={:.8} time(s)={:.4}",
-            act,
-            EPOCHS,
-            final_train_mse,
-            final_test_mse,
-            elapsed
+            act, EPOCHS, final_train_mse, final_test_mse, elapsed
         );
     }
 

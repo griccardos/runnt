@@ -628,7 +628,12 @@ impl DatasetBuilder {
             .max()
             .unwrap_or(usize::MAX);
 
-        assert!(maxcolindex < mintrainlen,"A line in the train data does not have enough columns ({trainline:?}) ({mintrainlen}) vs max column index {} (column {})",maxcolindex,maxcolindex+1);
+        assert!(
+            maxcolindex < mintrainlen,
+            "A line in the train data does not have enough columns ({trainline:?}) ({mintrainlen}) vs max column index {} (column {})",
+            maxcolindex,
+            maxcolindex + 1
+        );
 
         //test data may be empty, if not, we do some tests:
         if !self.test_data.is_empty() {
@@ -639,7 +644,11 @@ impl DatasetBuilder {
                 .min_by(|a, b| a.0.cmp(&b.0))
                 .expect("Test data empty");
 
-            assert!(maxcolindex < mintestlen,"A line in the test data does not have enough columns ({testline:?}) ({mintestlen}) vs max column index {maxcolindex} (column {})",maxcolindex+1);
+            assert!(
+                maxcolindex < mintestlen,
+                "A line in the test data does not have enough columns ({testline:?}) ({mintestlen}) vs max column index {maxcolindex} (column {})",
+                maxcolindex + 1
+            );
         }
 
         if !self.headers.is_empty() {

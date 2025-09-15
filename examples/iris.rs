@@ -2,7 +2,7 @@
 
 use runnt::{
     dataset::{Conversion, Dataset},
-    nn::{ReportMetric, NN},
+    nn::{NN, ReportMetric},
 };
 
 // Example of how to use `Dataset` and classification
