@@ -1,13 +1,13 @@
-use runnt::{activation::ActivationType, dataset::Dataset, nn};
-
+use runnt::prelude::*;
 //Regression example
 pub fn main() {
     fastrand::seed(1);
 
     //Create Neural Network
-    let mut nn = runnt::nn::NN::new(&[1, 8, 8, 1])
-        .with_hidden_type(ActivationType::Sigmoid) //Non linear Activation function
-        .with_output_type(ActivationType::Sigmoid) //Expected output between 0 and 1
+    let mut nn = NN::new_input(1)
+        .layer(8)
+        .layer(dense(8).activation(Activation::Tanh))
+        .layer(dense(1).activation(Activation::Sigmoid))
         .with_learning_rate(0.5); //Learning rate
 
     //generate function which we want to predict
@@ -28,7 +28,7 @@ pub fn main() {
         .add_input_columns(&[0], runnt::dataset::Conversion::F32)
         .add_target_columns(&[1], runnt::dataset::Conversion::F32)
         .build();
-    nn.train(&set, 1000, 1, 100, nn::ReportMetric::None);
+    nn.train(&set, 1000, 1, 100, ReportMetric::None);
 
     inp_out
         .iter()

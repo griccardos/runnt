@@ -1,32 +1,31 @@
-use ndarray::Array;
 use ndarray::prelude::*;
 use std::fmt::Display;
 use std::path::Path;
-use std::str::FromStr;
 use std::time::Instant;
 
-use crate::activation::{ActivationType, activate, activate_der};
+use crate::activation::{Activation, activate, activate_der};
 use crate::dataset::Dataset;
 use crate::error::Error;
-use crate::initialization::{InitializationType, calc_initialization};
+use crate::initialization::Initialization;
+use crate::layer::{Dense, DenseBuilder};
 use crate::loss::Loss;
-use crate::optimizer::Optimizer;
-use crate::optimizer::OptimizerType;
+use crate::optimizer::{Optimizer, OptimizerInternal};
 use crate::regularization::Regularization;
 use crate::sede::Sede;
 
 /// Struct holding Neural Net functionality
 ///```rust
 ///   //XOR
-///    use runnt::{nn::NN,activation::ActivationType};
+///    use runnt::{nn::NN,activation::Activation};
 ///    let inputs = [[0., 0.], [0., 1.], [1., 0.], [1., 1.]];
 ///    let outputs = [[0.], [1.], [1.], [0.]];
 ///
 ///        let mut nn = NN::new(&[2, 8, 1])
 ///        .with_learning_rate(0.25)
-///        .with_hidden_type(ActivationType::Tanh)
-///        .with_output_type(ActivationType::Sigmoid);
-///
+///        .with_activation_hidden(Activation::Tanh)
+///        .with_activation_output(Activation::Sigmoid);
+///        //OR
+
 ///
 ///    for i in 0..5000 {
 ///        nn.fit_one(&inputs[i % 4], &outputs[i % 4]);
@@ -37,19 +36,13 @@ use crate::sede::Sede;
 ///    assert_eq!(nn.forward(&[1., 1.]).first().unwrap().round(), 0.);
 ///```
 pub struct NN {
-    weights: Vec<Array2<f32>>, // layer * 2D matrix e.g. [2x2], [2x1]
-    bias: Vec<Array2<f32>>,    //layer * 2D matrix
-    pub learning_rate: f32,
-    hidden_type: ActivationType,
-    output_type: ActivationType,
-    regularization: Regularization,
-    loss: Loss,
-    optimizer: Optimizer,
-    label_smoothing: Option<f32>,
-    dropout: Option<f32>,
-
-    //not used, but stored for serialization
-    initialization: InitializationType,
+    pub(crate) layers: Vec<Dense>,
+    pub(crate) learning_rate: f32,
+    pub(crate) loss: Loss,
+    pub(crate) optimizer: OptimizerInternal,
+    pub(crate) label_smoothing: Option<f32>,
+    //only for checking on adding first layer
+    pub(crate) input: usize,
 }
 
 impl NN {
@@ -61,73 +54,53 @@ impl NN {
     ///  learning rate = 0.01<br/>
     ///  hidden layer type: Sigmoid  <br/>
     ///  output layer type: Linear  <br/>
-    ///  weight initialization: Random  <br/>
+    ///  weight initialization: Xavier  <br/>
     ///
     /// # Panics
-    /// If network shape does not have at least 2 layers
+    /// If network shape does not have at least 2 layers (one input and one output)
     pub fn new(network_shape: &[usize]) -> NN {
-        let mut weights = vec![];
-        let mut bias = vec![];
-
-        let layers = network_shape.len();
+        let layer_count = network_shape.len();
         assert!(
-            layers >= 2,
+            layer_count >= 2,
             "Network must have at least 2 layers: input and output"
         );
 
-        for l1 in 0..layers {
-            let this_size = network_shape[l1];
+        let mut b = NN::new_input(network_shape[0]);
 
-            //dont need for last layer
-            if l1 < layers - 1 {
-                let next_size = network_shape[l1 + 1];
-                bias.push(Array::from_shape_fn([1, next_size], |_| 0.));
-                weights.push(Array::from_shape_fn([this_size, next_size], |_| 0.));
-            }
+        for i in 1..layer_count {
+            b = b.layer(network_shape[i]);
         }
+        b
+    }
 
-        let mut s = Self {
-            weights,
-            bias,
+    pub fn new_input(input: usize) -> NN {
+        NN {
+            layers: vec![],
             learning_rate: 0.01,
-            hidden_type: ActivationType::Sigmoid,
-            output_type: ActivationType::Linear,
-            regularization: Regularization::None,
             loss: Loss::MSE,
-            optimizer: Optimizer::none(),
-            initialization: InitializationType::Xavier,
+            optimizer: Optimizer::sgd().into(),
             label_smoothing: None,
-            dropout: None,
+            input,
+        }
+    }
+
+    pub fn layer(mut self, dense: impl Into<DenseBuilder>) -> NN {
+        let input = if self.layers.is_empty() {
+            self.input
+        } else {
+            self.layers.last().unwrap().weights.shape()[1]
         };
-        s.reset_weights();
-        s
+        let dense: DenseBuilder = dense.into();
+        self.layers.push(dense.build(input));
+        self
     }
 
     pub fn with_learning_rate(mut self, rate: f32) -> NN {
         self.learning_rate = rate;
         self
     }
-    pub fn with_optimizer(mut self, optimizer: OptimizerType) -> NN {
-        self.optimizer = Optimizer::new(optimizer, &self.weights, &self.bias);
-        self
-    }
-
-    pub fn with_hidden_type(mut self, types: ActivationType) -> Self {
-        self.hidden_type = types;
-        self
-    }
-    pub fn with_output_type(mut self, types: ActivationType) -> Self {
-        self.output_type = types;
-        self
-    }
-    pub fn with_initialization(mut self, typ: InitializationType) -> Self {
-        self.initialization = typ;
-        self.reset_weights();
-        self
-    }
-
-    pub fn with_regularization(mut self, reg: Regularization) -> Self {
-        self.regularization = reg;
+    pub fn with_optimizer(mut self, optimizer: Optimizer) -> NN {
+        self.optimizer = OptimizerInternal::from(optimizer);
         self
     }
 
@@ -159,36 +132,12 @@ impl NN {
         self
     }
 
-    /// Dropout rate for hidden layers.
-    /// A good default is 0.1
-    pub fn with_dropout(mut self, rate: f32) -> Self {
-        assert!(
-            rate > 0. && rate < 1.,
-            "Dropout rate must be in range (0,1)"
-        );
-        self.dropout = Some(rate);
-        self
-    }
-
     pub fn shape(&self) -> Vec<usize> {
-        let mut shape = vec![self.weights[0].shape()[0]]; //input layer size
-        for w in &self.weights {
-            shape.push(w.shape()[1]); //next layer size
+        let mut shape = vec![self.layers[0].weights.shape()[0]]; //input layer size
+        for lay in &self.layers {
+            shape.push(lay.weights.shape()[1]); //next layer size
         }
         shape
-    }
-
-    ///Initialize weights based on `InitializationType`
-    ///Bias becomes zero
-    pub fn reset_weights(&mut self) {
-        let layers = self.shape().len();
-        for l in 0..layers - 1 {
-            let this_size = self.shape()[l];
-            let next_size = self.shape()[l + 1];
-            self.bias[l].mapv_inplace(|_| 0.);
-            self.weights[l]
-                .mapv_inplace(|_| calc_initialization(self.initialization, this_size, next_size));
-        }
     }
 
     ///Also known as Stochastic Gradient Descent i.e. Gradient descent with batch size = 1
@@ -235,24 +184,31 @@ impl NN {
             None => targets.iter().map(|a| a.to_vec()).collect(),
         };
         let targets = &new_targets.iter().map(|a| a).collect::<Vec<&Vec<f32>>>();
-        //calc dropout mask
-        let dropout_mask = dropout(self.dropout, &self.shape());
 
         let inputs_matrix = to_matrix(inputs);
         let targets_matrix = to_matrix(targets);
-        let values = self.internal_forward(&inputs_matrix, &dropout_mask);
+        self.update_dropout();
+        let values = self.internal_forward(&inputs_matrix, true);
         let outputs = values.activated.last().expect("There should be outputs");
 
         let loss = self.loss.gradient(outputs, &targets_matrix);
-        let (mut weight_gradient, bias_gradient) = self.backwards(values, loss, &dropout_mask);
+        let (mut weight_gradient, bias_gradient) = self.backwards(values, loss);
         self.regularize(&mut weight_gradient);
         self.apply_gradients(weight_gradient, bias_gradient);
+    }
+
+    fn update_dropout(&mut self) {
+        self.layers.iter_mut().for_each(|l| {
+            if let Some(dropout) = &mut l.dropout {
+                dropout.recalc();
+            }
+        });
     }
 
     /// Forward inputs into the network, and returns output result i.e. `prediction`
     pub fn forward(&self, input: &[f32]) -> Vec<f32> {
         let inputs = to_matrix(&[&input.to_vec()]);
-        let values = self.internal_forward(&inputs, &None);
+        let values = self.internal_forward(&inputs, false);
         let vals = values.activated.last().expect("There should be outputs");
         //now return the values as a vec
         vals.flatten().to_vec()
@@ -277,7 +233,7 @@ impl NN {
 
     fn internal_forward_errors(&self, inputs: &Array2<f32>, targets: &Array2<f32>) -> f32 {
         let count = inputs.shape()[0];
-        let vals = self.internal_forward(inputs, &None);
+        let vals = self.internal_forward(inputs, false);
         let outs = vals.activated.last().expect("There should be outputs");
         let errs = self.internal_calc_errors(outs, targets);
         errs.iter().sum::<f32>() / count as f32
@@ -346,11 +302,7 @@ impl NN {
     /// each input value is in a different column
     /// so for 32 examples in a 10 node layer we have 32x10 matrix
     /// if softmax, we convert last layer
-    fn internal_forward(
-        &self,
-        input: &Array2<f32>,
-        dropout_mask: &Option<Vec<Array1<f32>>>,
-    ) -> ValueAndActivated {
+    fn internal_forward(&self, input: &Array2<f32>, is_training: bool) -> ValueAndActivated {
         assert_eq!(
             input.shape()[1],
             self.shape()[0],
@@ -363,21 +315,21 @@ impl NN {
         activated.push(input.clone());
         values.push(input.clone());
 
-        for l in 0..self.weights.len() {
-            let mut act_sum = &activated[l].dot(&self.weights[l]) + &self.bias[l];
+        for l in 0..self.layers.len() {
+            let mut act_sum = &activated[l].dot(&self.layers[l].weights) + &self.layers[l].bias;
             let sum = act_sum.clone();
 
             //apply activation
             let ltype = self.get_layer_type(l);
 
-            let is_last_layer = l == self.weights.len() - 1;
+            let is_last_layer = l == self.layers.len() - 1;
 
             if !is_last_layer {
                 //hidden layers
                 act_sum.mapv_inplace(|a| activate(a, ltype));
                 //apply dropout if set
-                if let Some(mask) = dropout_mask {
-                    act_sum *= &mask[l];
+                if is_training && let Some(dropout) = &self.layers[l].dropout {
+                    act_sum *= &dropout.mask();
                 }
             } else {
                 match self.loss {
@@ -398,7 +350,7 @@ impl NN {
                     }
                     Loss::BinaryCrossEntropy => {
                         //apply sigmoid
-                        act_sum.mapv_inplace(|a| activate(a, ActivationType::Sigmoid));
+                        act_sum.mapv_inplace(|a| activate(a, Activation::Sigmoid));
                     }
                 }
             }
@@ -410,15 +362,15 @@ impl NN {
         ValueAndActivated { values, activated }
     }
 
-    fn get_layer_type(&self, layer: usize) -> ActivationType {
-        let is_last_layer = layer == self.weights.len() - 1;
+    fn get_layer_type(&self, layer_number: usize) -> Activation {
+        let is_last_layer = layer_number == self.layers.len() - 1;
         if !is_last_layer {
-            return self.hidden_type;
+            return self.layers[layer_number].activation;
         }
         match self.loss {
-            Loss::MSE => self.output_type,
+            Loss::MSE => self.layers[layer_number].activation,
             // Last layer: choose linear for these because for backward we don't want to activation derivative. We manually calculate the correct activation in forward
-            Loss::SoftmaxAndCrossEntropy | Loss::BinaryCrossEntropy => ActivationType::Linear,
+            Loss::SoftmaxAndCrossEntropy | Loss::BinaryCrossEntropy => Activation::Linear,
         }
     }
 
@@ -428,7 +380,6 @@ impl NN {
         &self,
         values_and_activations: ValueAndActivated,
         output_gradient: Array2<f32>,
-        dropout_mask: &Option<Vec<Array1<f32>>>,
     ) -> (Vec<Array2<f32>>, Vec<Array2<f32>>) {
         let layers = self.shape().len();
 
@@ -459,7 +410,7 @@ impl NN {
         for l in (0..layers - 1).rev() {
             let next_activations = &values_and_activations.activated[l + 1]; //A
             let this_values = &values_and_activations.activated[l]; //In
-            let this_weights = &self.weights[l]; //W
+            let this_weights = &self.layers[l].weights; //W
             let next_values = &values_and_activations.values[l + 1]; //Z - needed for derivative sometimes
             let ltype = self.get_layer_type(l);
 
@@ -467,6 +418,8 @@ impl NN {
             let example_count = next_activations.shape()[0];
             let number_count = next_activations.shape()[1];
             let mut da_dz: Array2<f32> = next_activations.clone();
+
+            let dropout_mask = self.layers[l].dropout.as_ref().map(|a| a.mask().clone());
             for e in 0..example_count {
                 for n in 0..number_count {
                     if dropout_mask.is_none() {
@@ -486,7 +439,7 @@ impl NN {
             //apply dropout if set
             if let Some(mask) = dropout_mask {
                 if l < mask.len() {
-                    de_dz *= &mask[l];
+                    de_dz *= &mask;
                 }
             }
 
@@ -516,26 +469,23 @@ impl NN {
 
     ///Apply regularization to gradients
     fn regularize(&self, weight_gradients: &mut [Array2<f32>]) {
-        match self.regularization {
-            Regularization::None => {}
-            Regularization::L1(lambda) => {
-                // L1 =  0.5*|w|*lambda
-                //thus dL1/dw = sign(w) * lambda
-                //we adjust current gradients effectively reducing value of weight
-                for (wlayer, gradlayer) in self.weights.iter().zip(weight_gradients.iter_mut()) {
+        for (gradlayer, layer) in weight_gradients.iter_mut().zip(&self.layers) {
+            let wlayer = &layer.weights;
+            match layer.regularization {
+                Regularization::None => {}
+                Regularization::L1(lambda) => {
+                    // L1 =  0.5*|w|*lambda
+                    //thus dL1/dw = sign(w) * lambda
+                    //we adjust current gradients effectively reducing value of weight
                     *gradlayer += &(wlayer.mapv(f32::signum) * lambda);
                 }
-            }
-            Regularization::L2(lambda) => {
-                // L2 =  0.5*w^2*lambda
-                //thus dL2/dw = w * lambda
-                //we adjust current gradients effectively reducing value of weight
-                for (wlayer, gradlayer) in self.weights.iter().zip(weight_gradients.iter_mut()) {
+                Regularization::L2(lambda) => {
+                    // L2 =  0.5*w^2*lambda
+                    //thus dL2/dw = w * lambda
+                    //we adjust current gradients effectively reducing value of weight
                     *gradlayer += &(wlayer * lambda);
                 }
-            }
-            Regularization::L1L2(l1lambda, l2lambda) => {
-                for (wlayer, gradlayer) in self.weights.iter().zip(weight_gradients.iter_mut()) {
+                Regularization::L1L2(l1lambda, l2lambda) => {
                     let l1: Array2<f32> = wlayer.mapv(f32::signum) * l1lambda;
                     let l2: Array2<f32> = wlayer * l2lambda;
                     *gradlayer += &(l1 + l2);
@@ -558,8 +508,8 @@ impl NN {
 
         let layers = self.shape().len();
         for l in 0..layers - 1 {
-            self.bias[l] = &self.bias[l] + &db[l];
-            self.weights[l] = &self.weights[l] + &dw[l];
+            self.layers[l].bias = &self.layers[l].bias + &db[l];
+            self.layers[l].weights = &self.layers[l].weights + &dw[l];
         }
     }
 
@@ -590,8 +540,8 @@ impl NN {
         let mut weights = vec![];
 
         //for each layer...
-        for l in 0..self.weights.len() {
-            for i in &self.weights[l] {
+        for l in 0..self.layers.len() {
+            for i in &self.layers[l].weights {
                 weights.push(*i);
             }
         }
@@ -603,8 +553,8 @@ impl NN {
         let mut biases = vec![];
 
         //for each layer...
-        for l in 0..self.bias.len() {
-            for i in &self.bias[l] {
+        for l in 0..self.layers.len() {
+            for i in &self.layers[l].bias {
                 biases.push(*i);
             }
         }
@@ -616,13 +566,13 @@ impl NN {
     /// Format: layer1weights,layer2weights etc...
     pub fn set_weights(&mut self, weights: &[f32]) {
         assert!(
-            weights.len() == self.weights.iter().map(|a| a.len()).sum::<usize>(),
+            weights.len() == self.layers.iter().map(|a| a.weights.len()).sum::<usize>(),
             "Weights length does not match network size"
         );
         let mut counter = 0;
 
-        for l in 0..self.weights.len() {
-            for i in self.weights[l].iter_mut() {
+        for l in 0..self.layers.len() {
+            for i in self.layers[l].weights.iter_mut() {
                 *i = weights[counter];
                 counter += 1;
             }
@@ -635,8 +585,8 @@ impl NN {
     pub fn set_biases(&mut self, biases: &[f32]) {
         let mut counter = 0;
 
-        for l in 0..self.bias.len() {
-            for i in self.bias[l].iter_mut() {
+        for l in 0..self.layers.len() {
+            for i in self.layers[l].bias.iter_mut() {
                 *i = biases[counter];
                 counter += 1;
             }
@@ -792,35 +742,38 @@ impl NN {
         }
         acc_string
     }
-}
-/// Create dropout masks for each hidden layer (excludes input and output layer)
-/// Use same mask for each example in the entire batch
-fn dropout(
-    dropout: Option<f32>,
-    shape: &[usize], //input,hidden...,output
-) -> Option<Vec<Array1<f32>>> {
-    let dropout = dropout?;
-    Some(
-        shape
-            .iter()
-            .skip(1) //skip input layer
-            .take(shape.len() - 2) //skip output layer
-            .map(|&s| {
-                let mask = (0..s)
-                    .map(|_| {
-                        //keep with prob 1-dropout
-                        if fastrand::f32() < dropout {
-                            0.
-                        } else {
-                            1. / (1. - dropout) //scale up to keep expected value the same
-                        }
-                    })
-                    .collect::<Vec<_>>();
 
-                Array1::from(mask)
-            })
-            .collect(),
-    )
+    pub fn with_initialization(mut self, initialization: Initialization) -> Self {
+        for layer in &mut self.layers {
+            layer.initialization = initialization;
+            layer.reinitialize();
+        }
+        self
+    }
+    pub fn with_regularization(mut self, reg: Regularization) -> Self {
+        for layer in &mut self.layers {
+            layer.regularization = reg.clone();
+        }
+        self
+    }
+
+    pub fn with_activation_hidden(mut self, atype: Activation) -> Self {
+        for l in 0..self.layers.len() - 1 {
+            self.layers[l].activation = atype;
+        }
+        self
+    }
+    pub fn with_activation_output(mut self, atype: Activation) -> Self {
+        let last = self.layers.len() - 1;
+        self.layers[last].activation = atype;
+        self
+    }
+
+    pub fn reset_weights(&mut self) {
+        for l in self.layers.iter_mut() {
+            l.reinitialize();
+        }
+    }
 }
 
 fn smooth_labels(targets: &[&Vec<f32>], rate: f32) -> Vec<Vec<f32>> {
@@ -837,14 +790,11 @@ impl Sede for NN {
     fn serialize(&self) -> String {
         let mut vec = vec![];
         vec.push(format!("learning_rate={}", self.learning_rate));
-        vec.push(format!("hidden_type={}", self.hidden_type));
-        vec.push(format!("output_type={}", self.output_type));
-        vec.push(format!("regularization={}", self.regularization));
         vec.push(format!("loss={}", self.loss.serialize()));
-        vec.push(format!("initialization={}", self.initialization));
         vec.push(format!("optimizer={}", self.optimizer.serialize()));
-        vec.push(format!("bias={}", self.bias.serialize()));
-        vec.push(format!("weight={}", self.weights.serialize()));
+        for l in &self.layers {
+            vec.push(format!("layer={}", l.serialize()));
+        }
         vec.push(format!(
             "label_smoothing={}",
             match self.label_smoothing {
@@ -866,33 +816,14 @@ impl Sede for NN {
 
         let mut learning_rate = 0.01f32;
         let mut loss = Loss::MSE;
-        let mut hidden_type = ActivationType::Sigmoid;
-        let mut output_type = ActivationType::Linear;
-        let mut regularization = Regularization::None;
-        let mut initialization = InitializationType::Xavier;
         let mut label_smoothing = None;
-        let mut dropout = None;
-        let mut optimizer = Optimizer::none();
-        let mut weights: Vec<Array2<f32>> = vec![];
-        let mut bias: Vec<Array2<f32>> = vec![];
+        let mut optimizer = Optimizer::sgd().into();
+        let mut layers: Vec<Dense> = vec![];
         for line in data {
             if line[0] == "learning_rate" {
                 learning_rate = line[1].parse::<f32>()?;
-            } else if line[0] == "hidden_type" {
-                hidden_type = ActivationType::from_str(&line[1])?;
-            } else if line[0] == "output_type" {
-                output_type = ActivationType::from_str(&line[1])?;
-            } else if line[0] == "regularization" {
-                regularization = Regularization::deserialize(&line[1])?;
-            } else if line[0] == "initialization" {
-                initialization = InitializationType::deserialize(&line[1])?;
             } else if line[0] == "label_smoothing" {
                 label_smoothing = match line[1].as_str() {
-                    "None" => None,
-                    _ => Some(line[1].parse()?),
-                };
-            } else if line[0] == "dropout" {
-                dropout = match line[1].as_str() {
                     "None" => None,
                     _ => Some(line[1].parse()?),
                 };
@@ -900,26 +831,19 @@ impl Sede for NN {
                 loss = Loss::deserialize(&line[1])?;
             } else if line[0] == "optimizer" {
                 println!("opti");
-                optimizer = Optimizer::deserialize(&line[1])?;
+                optimizer = OptimizerInternal::deserialize(&line[1])?;
                 println!("opti2");
-            } else if line[0] == "weight" {
-                weights = <Vec<Array2<f32>>>::deserialize(&line[1])?
-            } else if line[0] == "bias" {
-                bias = <Vec<Array2<f32>>>::deserialize(&line[1])?;
+            } else if line[0] == "layer" {
+                layers.push(Dense::deserialize(&line[1])?);
             }
         }
         Ok(NN {
-            weights,
-            bias,
+            input: layers.first().unwrap().weights.shape()[0],
+            layers,
             learning_rate,
-            hidden_type,
-            output_type,
-            regularization,
             loss,
             optimizer,
-            initialization,
             label_smoothing,
-            dropout,
         })
     }
 }
@@ -930,24 +854,17 @@ impl Display for NN {
             f,
             r"
 Shape: {:?}
-Weights: {:?}
-Bias: {:?}
+Layers: {:?}
 Learning Rate: {}
-Initialization Type: {}
-Hidden Type: {}
-Output Type: {}
-Regularization: {}
 Loss: {}
 Optimizer: {}
 ",
             self.shape(),
-            self.weights.iter().map(|w| w.shape()).collect::<Vec<_>>(),
-            self.bias.iter().map(|b| b.shape()).collect::<Vec<_>>(),
+            self.layers
+                .iter()
+                .map(|l| l.to_string())
+                .collect::<Vec<_>>(),
             self.learning_rate,
-            self.initialization,
-            self.hidden_type,
-            self.output_type,
-            self.regularization,
             self.loss,
             self.optimizer,
         )?)

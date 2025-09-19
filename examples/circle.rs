@@ -39,7 +39,7 @@ pub fn main() {
     let mut net = NN::new(&[set.input_size(), 16, 8, set.target_size()])
         .with_learning_rate(0.01)
         .with_loss(Loss::MSE) //typically it would be BinaryCrossEntropy for classification, but we will try regression
-        .with_hidden_type(runnt::activation::ActivationType::Tanh);
+        .with_activation_hidden(runnt::activation::Activation::Tanh);
 
     //run reporting the mse
     net.train(&set, 500, 16, 50, ReportMetric::RSquared); //use Classification if using BCE

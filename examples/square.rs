@@ -1,4 +1,4 @@
-use runnt::activation::ActivationType;
+use runnt::activation::Activation;
 
 //Regression and regularization example
 pub fn main() {
@@ -6,26 +6,26 @@ pub fn main() {
 
     //Create Neural Network
     let mut nn = runnt::nn::NN::new(&[6, 8, 8, 1])
-        .with_hidden_type(ActivationType::Sigmoid)
-        .with_output_type(ActivationType::Linear)
+        .with_activation_hidden(Activation::Sigmoid)
+        .with_activation_output(Activation::Linear)
         .with_regularization(runnt::regularization::Regularization::None)
         .with_learning_rate(0.2);
 
     let mut nnl1 = runnt::nn::NN::new(&[6, 8, 8, 1])
-        .with_hidden_type(ActivationType::Sigmoid)
-        .with_output_type(ActivationType::Linear)
+        .with_activation_hidden(Activation::Sigmoid)
+        .with_activation_output(Activation::Linear)
         .with_regularization(runnt::regularization::Regularization::L1(0.001))
         .with_learning_rate(0.2);
 
     let mut nnl2 = runnt::nn::NN::new(&[6, 8, 8, 1])
-        .with_hidden_type(ActivationType::Sigmoid)
-        .with_output_type(ActivationType::Linear)
+        .with_activation_hidden(Activation::Sigmoid)
+        .with_activation_output(Activation::Linear)
         .with_regularization(runnt::regularization::Regularization::L2(0.001))
         .with_learning_rate(0.4);
 
     let mut nnl1l2 = runnt::nn::NN::new(&[6, 8, 8, 1])
-        .with_hidden_type(ActivationType::Sigmoid)
-        .with_output_type(ActivationType::Linear)
+        .with_activation_hidden(Activation::Sigmoid)
+        .with_activation_output(Activation::Linear)
         .with_regularization(runnt::regularization::Regularization::L1L2(0.001, 0.001))
         .with_learning_rate(0.4);
 

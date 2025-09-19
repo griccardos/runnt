@@ -1,5 +1,5 @@
-use runnt::optimizer::OptimizerType;
-use runnt::{activation::ActivationType, dataset::Dataset, nn::NN};
+use runnt::optimizer::Optimizer;
+use runnt::{activation::Activation, dataset::Dataset, nn::NN};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::time::Instant;
@@ -42,11 +42,7 @@ pub fn main() {
         .open("optimizer_summary.csv")
         .expect("Could not create summary CSV");
 
-    let optimizers = [
-        OptimizerType::None,
-        OptimizerType::momentum(),
-        OptimizerType::adam(),
-    ];
+    let optimizers = [Optimizer::sgd(), Optimizer::momentum(), Optimizer::adam()];
 
     let mut all_mses: Vec<Vec<f32>> = Vec::with_capacity(optimizers.len());
 
@@ -58,8 +54,8 @@ pub fn main() {
 
     for &op in &optimizers {
         let mut net = NN::new(&[1, 8, 8, 1])
-            .with_hidden_type(ActivationType::Sigmoid)
-            .with_output_type(ActivationType::Sigmoid)
+            .with_activation_hidden(Activation::Sigmoid)
+            .with_activation_output(Activation::Sigmoid)
             .with_optimizer(op)
             .with_learning_rate(LEARNING_RATE);
 

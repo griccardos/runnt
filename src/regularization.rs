@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use crate::{error::Error, sede::Sede};
 
+#[derive(Clone, Debug, PartialEq)]
 pub enum Regularization {
     None,
     ///try 0.00001

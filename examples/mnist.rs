@@ -5,11 +5,11 @@ use std::{
 };
 
 use runnt::{
-    activation::ActivationType,
-    initialization::InitializationType,
+    activation::Activation,
+    initialization::Initialization,
     loss::Loss,
     nn::{NN, max_index, max_index_equal},
-    optimizer::OptimizerType,
+    optimizer::Optimizer,
     regularization::Regularization,
 };
 
@@ -32,11 +32,11 @@ cargo run --release --example mnist -- /tmp/mnist
     }
 
     let mut nn = NN::new(&[784, 128, 10])
-        .with_hidden_type(ActivationType::Swish)
+        .with_activation_hidden(Activation::Swish)
         .with_loss(Loss::SoftmaxAndCrossEntropy)
-        .with_initialization(InitializationType::He)
+        .with_initialization(Initialization::He)
         .with_regularization(Regularization::L2(0.0001))
-        .with_optimizer(OptimizerType::adam())
+        .with_optimizer(Optimizer::adam())
         .with_learning_rate(0.001);
 
     let path = &args[1];

@@ -1,6 +1,5 @@
-use runnt::{
-    activation::ActivationType, dataset::Dataset, initialization::InitializationType, nn::NN,
-};
+use runnt::prelude::*;
+use runnt::sede::Sede;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::time::Instant;
@@ -44,11 +43,11 @@ pub fn main() {
         .expect("Could not create summary CSV");
 
     let activations = [
-        ActivationType::Relu,
-        ActivationType::Sigmoid,
-        ActivationType::Linear,
-        ActivationType::Tanh,
-        ActivationType::Swish,
+        Activation::Relu,
+        Activation::Sigmoid,
+        Activation::Linear,
+        Activation::Tanh,
+        Activation::Swish,
     ];
 
     let mut all_mses: Vec<Vec<f32>> = Vec::with_capacity(activations.len());
@@ -61,9 +60,9 @@ pub fn main() {
 
     for &act in &activations {
         let mut net = NN::new(&[1, 8, 8, 1])
-            .with_hidden_type(act)
-            .with_output_type(ActivationType::Sigmoid)
-            .with_initialization(InitializationType::He)
+            .with_activation_hidden(act)
+            .with_activation_output(Activation::Sigmoid)
+            .with_initialization(Initialization::He)
             .with_learning_rate(LEARNING_RATE);
 
         let mut mse_series: Vec<f32> = Vec::with_capacity(EPOCHS);
@@ -92,17 +91,25 @@ pub fn main() {
         writeln!(
             summary,
             "{},{},{:.8},{:.8},{:.4}",
-            act, EPOCHS, final_train_mse, final_test_mse, elapsed
+            act.serialize(),
+            EPOCHS,
+            final_train_mse,
+            final_test_mse,
+            elapsed
         )
         .unwrap();
         println!(
             "Activation {} completed: epochs={} final_train_mse={:.8} final_test_mse={:.8} time(s)={:.4}",
-            act, EPOCHS, final_train_mse, final_test_mse, elapsed
+            act.serialize(),
+            EPOCHS,
+            final_train_mse,
+            final_test_mse,
+            elapsed
         );
     }
 
     let header = std::iter::once("epoch".to_string())
-        .chain(activations.iter().map(|a| a.to_string()))
+        .chain(activations.iter().map(|a| a.serialize()))
         .collect::<Vec<_>>()
         .join(",");
     writeln!(per_epoch, "{}", header).unwrap();

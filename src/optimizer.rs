@@ -6,31 +6,31 @@ use crate::{error::Error, sede::Sede};
 
 //used for selection
 #[derive(Clone, Copy)]
-pub enum OptimizerType {
-    None,
+pub enum Optimizer {
+    SGD,
     Momentum { beta: f32 },
     Adam { beta1: f32, beta2: f32 },
 }
-impl OptimizerType {
+impl Optimizer {
+    pub fn sgd() -> Self {
+        Optimizer::SGD
+    }
     pub fn momentum() -> Self {
-        OptimizerType::Momentum { beta: 0.9 }
+        Optimizer::Momentum { beta: 0.9 }
     }
 
     pub fn adam() -> Self {
-        OptimizerType::Adam {
+        Optimizer::Adam {
             beta1: 0.9,
             beta2: 0.999,
         }
     }
 }
 
-pub(crate) struct Optimizer {
-    optimizer: OptimizerInternal,
-}
-impl Display for Optimizer {
+impl Display for OptimizerInternal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.optimizer {
-            OptimizerInternal::None => write!(f, "None"),
+        match &self {
+            OptimizerInternal::SGD => write!(f, "SGD"),
             OptimizerInternal::Momentum(momentum) => {
                 write!(f, "Momentum(beta={})", momentum.beta)
             }
@@ -41,41 +41,19 @@ impl Display for Optimizer {
     }
 }
 
-impl Optimizer {
-    pub(crate) fn none() -> Self {
-        Self {
-            optimizer: OptimizerInternal::None,
-        }
-    }
-
-    pub(crate) fn new(typ: OptimizerType, weights: &[Array2<f32>], bias: &[Array2<f32>]) -> Self {
-        match typ {
-            OptimizerType::None => Optimizer {
-                optimizer: OptimizerInternal::None,
-            },
-            OptimizerType::Momentum { beta } => Optimizer {
-                optimizer: OptimizerInternal::Momentum(Momentum::new(beta, weights, bias)),
-            },
-            OptimizerType::Adam { beta1, beta2 } => Optimizer {
-                optimizer: OptimizerInternal::Adam(Adam::new(beta1, beta2, weights, bias)),
-            },
-        }
-    }
-}
-
-impl Display for OptimizerType {
+impl Display for Optimizer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            OptimizerType::None => write!(f, "None"),
-            OptimizerType::Momentum { beta } => write!(f, "Momentum({})", beta),
-            OptimizerType::Adam { beta1, beta2 } => write!(f, "Adam({},{})", beta1, beta2),
+            Optimizer::SGD => write!(f, "None"),
+            Optimizer::Momentum { beta } => write!(f, "Momentum({})", beta),
+            Optimizer::Adam { beta1, beta2 } => write!(f, "Adam({},{})", beta1, beta2),
         }
     }
 }
 
 //used internally to hold data
 pub(crate) enum OptimizerInternal {
-    None,
+    SGD,
     Momentum(Momentum),
     Adam(Adam),
 }
@@ -88,11 +66,10 @@ pub(crate) struct Momentum {
 
 impl Momentum {
     ///Beta is the amount of the old velocity we will keep (default=0.9)
-    pub fn new(beta: f32, weights: &[Array2<f32>], bias: &[Array2<f32>]) -> Self {
+    pub fn new(beta: f32) -> Self {
         Momentum {
-            weight_velocity: weights.iter().map(|a| Array2::zeros(a.dim())).collect(),
-            bias_velocity: bias.iter().map(|a| Array2::zeros(a.dim())).collect(),
-
+            weight_velocity: vec![],
+            bias_velocity: vec![],
             beta,
         }
     }
@@ -111,20 +88,28 @@ pub(crate) struct Adam {
 impl Adam {
     ///Beta1 is the amount of the old velocity we will keep (default=0.9)
     ///Beta2 is the amount of the old squared velocity we will keep (default=0.999)
-    pub fn new(beta1: f32, beta2: f32, weights: &[Array2<f32>], bias: &[Array2<f32>]) -> Self {
+    pub fn new(beta1: f32, beta2: f32) -> Self {
         Adam {
             beta1,
             beta2,
-            weight_velocity1: weights.iter().map(|a| Array2::zeros(a.dim())).collect(),
-            bias_velocity1: bias.iter().map(|a| Array2::zeros(a.dim())).collect(),
-            weight_velocity2: weights.iter().map(|a| Array2::zeros(a.dim())).collect(),
-            bias_velocity2: bias.iter().map(|a| Array2::zeros(a.dim())).collect(),
+            weight_velocity1: vec![],
+            bias_velocity1: vec![],
+            weight_velocity2: vec![],
+            bias_velocity2: vec![],
             step: 0,
         }
     }
 }
-
-impl Optimizer {
+impl From<Optimizer> for OptimizerInternal {
+    fn from(value: Optimizer) -> Self {
+        match value {
+            Optimizer::SGD => OptimizerInternal::SGD,
+            Optimizer::Momentum { beta } => OptimizerInternal::Momentum(Momentum::new(beta)),
+            Optimizer::Adam { beta1, beta2 } => OptimizerInternal::Adam(Adam::new(beta1, beta2)),
+        }
+    }
+}
+impl OptimizerInternal {
     ///this updates the gradients with the optimizer, and learning rate
     ///e.g. for None, it returns `-learning_rate*gradient`
     ///this returns (`weights_grad`,`bias_grad`)
@@ -134,13 +119,22 @@ impl Optimizer {
         mut bias_gradients: Vec<Array2<f32>>,
         learning_rate: f32,
     ) -> (Vec<Array2<f32>>, Vec<Array2<f32>>) {
+        fn init_zero(reference: &Vec<Array2<f32>>) -> Vec<Array2<f32>> {
+            reference.iter().map(|a| Array2::zeros(a.dim())).collect()
+        }
+
         for l in 0..weight_gradients.len() {
-            match &mut self.optimizer {
-                OptimizerInternal::None => {
+            match self {
+                OptimizerInternal::SGD => {
                     weight_gradients[l].mapv_inplace(|a| a * -learning_rate);
                     bias_gradients[l].mapv_inplace(|a| a * -learning_rate);
                 }
                 OptimizerInternal::Momentum(momentum) => {
+                    //init for first use
+                    if momentum.weight_velocity.is_empty() {
+                        momentum.weight_velocity = init_zero(&weight_gradients);
+                        momentum.bias_velocity = init_zero(&bias_gradients);
+                    }
                     momentum.weight_velocity[l] = &momentum.weight_velocity[l] * momentum.beta
                         - &weight_gradients[l] * learning_rate;
 
@@ -152,6 +146,13 @@ impl Optimizer {
                     bias_gradients[l] = momentum.bias_velocity[l].clone();
                 }
                 OptimizerInternal::Adam(adam) => {
+                    //init for first use
+                    if adam.weight_velocity1.is_empty() {
+                        adam.weight_velocity1 = init_zero(&weight_gradients);
+                        adam.bias_velocity1 = init_zero(&bias_gradients);
+                        adam.weight_velocity2 = init_zero(&weight_gradients);
+                        adam.bias_velocity2 = init_zero(&bias_gradients);
+                    }
                     adam.step += 1;
                     // Update first moment estimate
                     adam.weight_velocity1[l] = &adam.weight_velocity1[l] * adam.beta1
@@ -189,10 +190,10 @@ impl Optimizer {
     }
 }
 
-impl Sede for Optimizer {
+impl Sede for OptimizerInternal {
     fn serialize(&self) -> String {
-        match &self.optimizer {
-            OptimizerInternal::None => "None".to_string(),
+        match self {
+            OptimizerInternal::SGD => "SGD".to_string(),
             OptimizerInternal::Momentum(momentum) => {
                 format!(
                     "Momentum:{}_{}_{}",
@@ -216,10 +217,8 @@ impl Sede for Optimizer {
     }
 
     fn deserialize(s: &str) -> Result<Self, crate::error::Error> {
-        if s == "None" {
-            return Ok(Optimizer {
-                optimizer: OptimizerInternal::None,
-            });
+        if s == "SGD" {
+            return Ok(OptimizerInternal::SGD);
         } else if s.starts_with("Momentum:") {
             let Some((_, detail)) = s.split_once(':') else {
                 return Err(Error::SerializationError(
@@ -230,13 +229,11 @@ impl Sede for Optimizer {
             let beta: f32 = parts[0].parse()?;
             let weight_velocity = Array2::deserialize(parts[1])?;
             let bias_velocity = Array2::deserialize(parts[2])?;
-            Ok(Optimizer {
-                optimizer: OptimizerInternal::Momentum(Momentum {
-                    weight_velocity: vec![weight_velocity],
-                    bias_velocity: vec![bias_velocity],
-                    beta,
-                }),
-            })
+            Ok(OptimizerInternal::Momentum(Momentum {
+                weight_velocity: vec![weight_velocity],
+                bias_velocity: vec![bias_velocity],
+                beta,
+            }))
         } else if s.starts_with("Adam") {
             let Some((_, detail)) = s.split_once(':') else {
                 return Err(Error::SerializationError("Invalid Adam format".to_string()));
@@ -253,17 +250,15 @@ impl Sede for Optimizer {
             let bias_velocity1 = <Vec<Array2<f32>>>::deserialize(params[3])?;
             let weight_velocity2 = <Vec<Array2<f32>>>::deserialize(params[4])?;
             let bias_velocity2 = <Vec<Array2<f32>>>::deserialize(params[5])?;
-            Ok(Optimizer {
-                optimizer: OptimizerInternal::Adam(Adam {
-                    beta1,
-                    beta2,
-                    weight_velocity1,
-                    bias_velocity1,
-                    weight_velocity2,
-                    bias_velocity2,
-                    step: 0,
-                }),
-            })
+            Ok(OptimizerInternal::Adam(Adam {
+                beta1,
+                beta2,
+                weight_velocity1,
+                bias_velocity1,
+                weight_velocity2,
+                bias_velocity2,
+                step: 0,
+            }))
         } else {
             Err(crate::error::Error::SerializationError(
                 "Unknown optimizer type".to_string(),
@@ -283,9 +278,7 @@ mod tests {
 
     #[test]
     fn test_none_optimizer() {
-        let weights = vec![array![[1.0, 2.0], [3.0, 4.0]]];
-        let bias = vec![array![[1.0, 2.0]]];
-        let mut optimizer = Optimizer::new(OptimizerType::None, &weights, &bias);
+        let mut optimizer: OptimizerInternal = Optimizer::SGD.into();
 
         let weight_grad = vec![array![[0.5, -0.5], [1.0, -1.0]]];
         let bias_grad = vec![array![[0.1, -0.1]]];
@@ -303,10 +296,8 @@ mod tests {
 
     #[test]
     fn test_momentum_optimizer() {
-        let weights = vec![array![[1.0, 2.0], [3.0, 4.0]]];
-        let bias = vec![array![[1.0, 2.0]]];
         let beta = 0.9;
-        let mut optimizer = Optimizer::new(OptimizerType::Momentum { beta }, &weights, &bias);
+        let mut optimizer: OptimizerInternal = Optimizer::Momentum { beta }.into();
 
         let weight_grad = vec![array![[0.5, -0.5], [1.0, -1.0]]];
         let bias_grad = vec![array![[0.1, -0.1]]];
@@ -335,11 +326,9 @@ mod tests {
 
     #[test]
     fn test_adam_optimizer() {
-        let weights = vec![array![[1.0, 2.0], [3.0, 4.0]]];
-        let bias = vec![array![[1.0, 2.0]]];
         let beta1 = 0.9;
         let beta2 = 0.999;
-        let mut optimizer = Optimizer::new(OptimizerType::Adam { beta1, beta2 }, &weights, &bias);
+        let mut optimizer = OptimizerInternal::from(Optimizer::Adam { beta1, beta2 });
 
         let weight_grad = vec![array![[0.5, -0.5], [1.0, -1.0]]];
         let bias_grad = vec![array![[0.1, -0.1]]];
@@ -359,34 +348,32 @@ mod tests {
 
     #[test]
     fn test_serialize_deserialize_none() {
-        let optimizer = Optimizer::none();
+        let optimizer = OptimizerInternal::SGD;
         let s = optimizer.serialize();
-        let des = Optimizer::deserialize(&s).unwrap();
+        let des = OptimizerInternal::deserialize(&s).unwrap();
         assert_eq!(des.serialize(), s);
     }
 
     #[test]
     fn test_serialize_deserialize_momentum() {
-        let weights = vec![array![[1.0, 2.0], [3.0, 4.0]]];
-        let bias = vec![array![[1.0, 2.0]]];
         let beta = 0.9;
-        let optimizer = Optimizer::new(OptimizerType::Momentum { beta }, &weights, &bias);
+        let optimizer = OptimizerInternal::from(Optimizer::Momentum { beta });
 
         let s = optimizer.serialize();
-        let des = Optimizer::deserialize(&s).unwrap();
+        println!("{optimizer}={s}");
+
+        let des = OptimizerInternal::deserialize(&s).unwrap();
         assert_eq!(des.serialize(), s);
     }
 
     #[test]
     fn test_serialize_deserialize_adam() {
-        let weights = vec![array![[1.0, 2.0], [3.0, 4.0]]];
-        let bias = vec![array![[1.0, 2.0]]];
         let beta1 = 0.9;
         let beta2 = 0.999;
-        let optimizer = Optimizer::new(OptimizerType::Adam { beta1, beta2 }, &weights, &bias);
+        let optimizer = OptimizerInternal::from(Optimizer::Adam { beta1, beta2 });
 
         let s = optimizer.serialize();
-        let des = Optimizer::deserialize(&s).unwrap();
+        let des = OptimizerInternal::deserialize(&s).unwrap();
         assert_eq!(des.serialize(), s);
     }
 }

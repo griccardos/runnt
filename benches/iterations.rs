@@ -36,8 +36,8 @@ fn calc_error(c: &mut Criterion) {
 fn matrix_iterations_per_second(b: &mut Bencher) {
     let mut nn = runnt::nn::NN::new(&[10, 100, 50, 10])
         .with_learning_rate(0.01)
-        .with_hidden_type(runnt::activation::ActivationType::Sigmoid)
-        .with_output_type(runnt::activation::ActivationType::Linear);
+        .with_activation_hidden(runnt::activation::Activation::Sigmoid)
+        .with_activation_output(runnt::activation::Activation::Linear);
 
     b.iter(|| {
         nn.fit_one(
@@ -50,8 +50,8 @@ fn matrix_iterations_per_second(b: &mut Bencher) {
 fn matrix_iterations_per_second_forward(b: &mut Bencher) {
     let nn = runnt::nn::NN::new(&[10, 100, 50, 10])
         .with_learning_rate(0.01)
-        .with_hidden_type(runnt::activation::ActivationType::Sigmoid)
-        .with_output_type(runnt::activation::ActivationType::Linear);
+        .with_activation_hidden(runnt::activation::Activation::Sigmoid)
+        .with_activation_output(runnt::activation::Activation::Linear);
 
     b.iter(|| nn.forward(&[0., 1., 2., 3., 4., 5., 6., 7., 8., 9.]));
 }
@@ -59,8 +59,8 @@ fn matrix_iterations_per_second_forward(b: &mut Bencher) {
 fn matrix_batch_iterations_per_second(b: &mut Bencher) {
     let mut nn = runnt::nn::NN::new(&[10, 100, 50, 10])
         .with_learning_rate(0.01)
-        .with_hidden_type(runnt::activation::ActivationType::Sigmoid)
-        .with_output_type(runnt::activation::ActivationType::Linear);
+        .with_activation_hidden(runnt::activation::Activation::Sigmoid)
+        .with_activation_output(runnt::activation::Activation::Linear);
 
     let inputs = (0..100)
         .map(|_| vec![0., 1., 2., 3., 4., 5., 6., 7., 8., 9.])
@@ -78,8 +78,8 @@ fn matrix_batch_iterations_per_second(b: &mut Bencher) {
 fn batch_forward_error_per_second(b: &mut Bencher) {
     let nn = runnt::nn::NN::new(&[10, 100, 50, 10])
         .with_learning_rate(0.01)
-        .with_hidden_type(runnt::activation::ActivationType::Sigmoid)
-        .with_output_type(runnt::activation::ActivationType::Linear);
+        .with_activation_hidden(runnt::activation::Activation::Sigmoid)
+        .with_activation_output(runnt::activation::Activation::Linear);
 
     let inputs = (0..100)
         .map(|_| vec![0., 1., 2., 3., 4., 5., 6., 7., 8., 9.])

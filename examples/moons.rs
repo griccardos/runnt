@@ -1,6 +1,6 @@
 use std::f32::consts::PI;
 
-use runnt::{activation::ActivationType, dataset::Dataset, nn::ReportMetric};
+use runnt::{activation::Activation, dataset::Dataset, nn::ReportMetric};
 
 // Example: Classification, dataset, train
 pub fn main() {
@@ -17,8 +17,8 @@ pub fn main() {
 
     //Create Neural Network
     let mut nn = runnt::nn::NN::new(&[set.input_size(), 8, set.target_size()])
-        .with_hidden_type(ActivationType::Sigmoid)
-        .with_output_type(ActivationType::Linear)
+        .with_activation_hidden(Activation::Sigmoid)
+        .with_activation_output(Activation::Linear)
         .with_loss(runnt::loss::Loss::BinaryCrossEntropy)
         .with_learning_rate(0.1); //Learning rate
 

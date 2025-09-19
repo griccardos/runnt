@@ -24,6 +24,9 @@ impl Sede for Array2<f32> {
     }
 
     fn deserialize(s: &str) -> Result<Self, Error> {
+        if s.is_empty() {
+            return Ok(Array2::zeros((0, 0)));
+        }
         let rows = s
             .split(';')
             .map(|row| {

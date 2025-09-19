@@ -1,9 +1,12 @@
 pub mod activation;
 pub mod dataset;
+pub mod dropout;
 pub mod error;
 pub mod initialization;
+pub mod layer;
 pub mod loss;
 pub mod nn;
 pub mod optimizer;
+pub mod prelude;
 pub mod regularization;
 pub mod sede;

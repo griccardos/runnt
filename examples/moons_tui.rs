@@ -11,7 +11,7 @@ use ratatui::{
     symbols,
     widgets::{Axis, Block, Borders, Chart, Dataset as RtDataset, Paragraph, Wrap},
 };
-use runnt::{activation::ActivationType, dataset::Dataset as RnDataset, nn::ReportMetric};
+use runnt::{activation::Activation, dataset::Dataset as RnDataset, nn::ReportMetric};
 use std::{error::Error, io, time::Duration, time::Instant};
 
 // copy of generate_moons from examples/moons.rs
@@ -48,8 +48,8 @@ fn build_and_run() -> (Vec<(f64, f64, i32, i32)>, String) {
         .build();
 
     let mut nn = runnt::nn::NN::new(&[set.input_size(), 8, set.target_size()])
-        .with_hidden_type(ActivationType::Sigmoid)
-        .with_output_type(ActivationType::Linear)
+        .with_activation_hidden(Activation::Sigmoid)
+        .with_activation_output(Activation::Linear)
         .with_loss(runnt::loss::Loss::BinaryCrossEntropy)
         .with_learning_rate(0.05);
     let (inp_test, tar_test) = set.get_test_data();

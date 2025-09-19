@@ -1,16 +1,35 @@
 use std::collections::VecDeque;
+use std::str::FromStr;
 
 use ndarray::{Array2, arr2};
 use tempfile::NamedTempFile;
 
-use crate::activation::ActivationType;
-use crate::initialization::InitializationType;
-use crate::loss::Loss;
-use crate::nn::{NN, dropout};
-use crate::optimizer::OptimizerType;
-use crate::regularization::Regularization;
-use crate::sede::Sede;
+use crate::prelude::*;
+use crate::sede::*;
 
+#[test]
+fn builder_patterns() {
+    //Simple builder
+    let nn1 = NN::new(&[1, 2, 3, 4]) //give full network shape up front
+        .with_activation_hidden(Activation::Sigmoid) //apply to all hidden layers
+        .with_activation_output(Activation::Sigmoid) //apply to output only
+        .with_regularization(Regularization::None) //apply to all layers
+        .with_initialization(Initialization::Fixed(0.)); //apply to all layers
+
+    //Complex builder
+    //allows us to specify each layer individually
+    let nn2 = NN::new_input(1) //start with input size
+        .layer(2) //add layer with number assuming type = dense
+        .layer(dense(3)) //or specify dense
+        .layer(
+            dense(4)
+                .activation(Activation::Sigmoid) //configure activation for this layer
+                .regularization(Regularization::None) //configure regularization for this layer
+                .initializer(Initialization::Fixed(0.)), //configure initialization for this layer
+        )
+        .with_initialization(Initialization::Fixed(0.)); //can still override initialization for all layers
+    assert_eq!(nn1.serialize(), nn2.serialize());
+}
 #[test]
 fn test_shape() {
     let nn = NN::new(&[2, 3, 4, 5]);
@@ -24,11 +43,11 @@ fn test_xor() {
     //setup initial  weights
     let mut nn = NN::new(&[2, 2, 1])
         .with_learning_rate(0.5)
-        .with_hidden_type(ActivationType::Sigmoid)
-        .with_output_type(ActivationType::Sigmoid);
+        .with_activation_hidden(Activation::Sigmoid)
+        .with_activation_output(Activation::Sigmoid);
 
-    nn.weights = [arr2(&[[0.15, 0.2], [0.25, 0.3]]), arr2(&[[0.4], [0.45]])].to_vec();
-    nn.bias = [arr2(&[[0.35, 0.35]]), arr2(&[[0.6]])].to_vec();
+    nn.set_weights(&[0.15, 0.2, 0.25, 0.3, 0.4, 0.45]);
+    nn.set_biases(&[0.35, 0.35, 0.6]);
 
     //check forward
     let vals = nn.forward(&[0., 0.]);
@@ -53,7 +72,10 @@ fn test_xor() {
 
     for i in 0..4 {
         //check error
-        assert_eq!(nn.bias, known_biases[i]);
+        assert_eq!(
+            nn.layers.iter().map(|a| a.bias.clone()).collect::<Vec<_>>(),
+            known_biases[i]
+        );
         println!("{i}: biases ok");
         let error = nn.calc_error(&nn.forward(&inputs[i]), &outputs[i]);
         nn.fit_one(&inputs[i], &outputs[i]);
@@ -69,7 +91,7 @@ fn xor_bce() {
 
     let mut nn = NN::new(&[2, 8, 1])
         .with_learning_rate(0.1)
-        .with_hidden_type(ActivationType::Sigmoid)
+        .with_activation_hidden(Activation::Sigmoid)
         .with_loss(Loss::BinaryCrossEntropy);
 
     let mut inp_out = [
@@ -118,8 +140,8 @@ fn xor_gd() {
     fastrand::seed(1);
     let mut nn = crate::nn::NN::new(&[2, 8, 1])
         .with_learning_rate(0.8)
-        .with_hidden_type(ActivationType::Sigmoid)
-        .with_output_type(ActivationType::Sigmoid);
+        .with_activation_hidden(Activation::Sigmoid)
+        .with_activation_output(Activation::Sigmoid);
 
     let mut inp_out = [
         (vec![0f32, 0.], vec![0.1]),
@@ -175,8 +197,8 @@ fn readme() {
 
     let mut nn = NN::new(&[2, 8, 1])
         .with_learning_rate(0.2)
-        .with_hidden_type(ActivationType::Tanh)
-        .with_output_type(ActivationType::Linear);
+        .with_activation_hidden(Activation::Tanh)
+        .with_activation_output(Activation::Linear);
 
     for i in 0..5000 {
         nn.fit_one(&inputs[i % 4], &outputs[i % 4]);
@@ -232,10 +254,10 @@ fn test_save_load() {
     let nn = NN::new(&[10, 100, 10])
         .with_learning_rate(0.5)
         .with_regularization(Regularization::L1L2(0.1, 0.2))
-        .with_hidden_type(ActivationType::Tanh)
-        .with_output_type(ActivationType::Relu)
-        .with_initialization(InitializationType::Fixed(0.5))
-        .with_optimizer(OptimizerType::adam());
+        .with_activation_hidden(Activation::Tanh)
+        .with_activation_output(Activation::Relu)
+        .with_initialization(Initialization::Fixed(0.5))
+        .with_optimizer(Optimizer::adam());
 
     let input = [1., 2., 3., 4., 5., 6., 7., 8., 9., 10.];
     nn.forward(&input);
@@ -256,7 +278,7 @@ fn test_save_load() {
     assert_eq!(orig, new);
     assert_eq!(nn.serialize(), nn2.serialize());
     assert_eq!(nn.get_weights(), nn2.get_weights());
-    assert_eq!(nn.bias, nn2.bias);
+    assert_eq!(nn.get_biases(), nn2.get_biases());
 
     //test result the same
     nn2.forward(&input);
@@ -284,10 +306,10 @@ fn test_get_set_bias() {
 #[test]
 fn test_softmax_splits_even() {
     let nn = NN::new(&[1, 4])
-        .with_initialization(InitializationType::Fixed(1.))
+        .with_initialization(Initialization::Fixed(1.))
         .with_loss(crate::loss::Loss::SoftmaxAndCrossEntropy);
     let test = arr2(&[[5.], [3.]]); //they should all have the same weight so 0.25
-    let out = nn.internal_forward(&test, &None);
+    let out = nn.internal_forward(&test, false);
     let out = out.activated.last().unwrap();
     for row in out.rows() {
         assert_eq!(row.to_vec(), [0.25, 0.25, 0.25, 0.25]);
@@ -298,7 +320,7 @@ fn test_softmax_splits_even() {
 fn test_softmax_sums_to_one() {
     let nn = NN::new(&[1, 10, 8]).with_loss(crate::loss::Loss::SoftmaxAndCrossEntropy);
     let test = arr2(&[[5.], [3.]]);
-    let out = nn.internal_forward(&test, &None);
+    let out = nn.internal_forward(&test, false);
     let out = out.activated.last().unwrap();
     for row in out.rows() {
         let sum = row.sum();
@@ -311,9 +333,9 @@ fn test_softmax_sums_to_one() {
 #[test]
 fn known_weights() {
     let mut nn = NN::new(&[2, 3, 2])
-        .with_output_type(ActivationType::Sigmoid)
+        .with_activation_output(Activation::Sigmoid)
         .with_learning_rate(0.1);
-    println!("nn: {:?}, {:?}", nn.weights, nn.bias);
+    println!("nn: {:?}, {:?}", nn.get_weights(), nn.get_biases());
     nn.set_weights(&[0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]);
     assert_eq!(nn.get_biases(), &[0., 0., 0., 0., 0.]);
 
@@ -347,7 +369,7 @@ fn approx_eq_mat(a: &Array2<f32>, b: &Array2<f32>, eps: f32) -> bool {
 fn test_loss_and_backprop_mse() {
     // Network: 2 inputs -> 1 output, linear output + MSE
     let mut nn = NN::new(&[2, 1])
-        .with_output_type(ActivationType::Linear)
+        .with_activation_output(Activation::Linear)
         .with_loss(Loss::MSE);
 
     // set weights and bias to zero (2 weights)
@@ -358,7 +380,7 @@ fn test_loss_and_backprop_mse() {
     let target = arr2(&[[1.0]]); // shape (1 x 1)
 
     // forward
-    let vals = nn.internal_forward(&input, &None);
+    let vals = nn.internal_forward(&input, false);
     let outputs = vals.activated.last().unwrap().clone(); // (1 x 1) -> a = 0 because weights/bias = 0
 
     // check internal_calc_errors (MSE) = 0.5 * (t - a)^2 = 0.5
@@ -367,7 +389,7 @@ fn test_loss_and_backprop_mse() {
 
     // check output_loss (dE/dA) and backwards gradient:
     let loss_grad = nn.loss.gradient(&outputs, &target); // should be a - t = -1
-    let (wgrads, _bgrads) = nn.backwards(vals, loss_grad, &None);
+    let (wgrads, _bgrads) = nn.backwards(vals, loss_grad);
 
     // expected weight gradient for single example:
     // de/dz = a - t = -1
@@ -389,7 +411,7 @@ fn test_loss_and_backprop_softmax_crossentropy() {
     let target = arr2(&[[1.0, 0.0, 0.0]]); // (1 x 3)
 
     // forward: with zero pre-activations, softmax -> uniform probabilities 1/3
-    let vals = nn.internal_forward(&input, &None);
+    let vals = nn.internal_forward(&input, false);
     let outputs = vals.activated.last().unwrap().clone();
     for &p in outputs.row(0).iter() {
         // each probability must be approx 1/3
@@ -403,7 +425,7 @@ fn test_loss_and_backprop_softmax_crossentropy() {
 
     // Now check gradients:
     let loss_grad = nn.loss.gradient(&outputs, &target); // a - t = [1/3 - 1, 1/3, 1/3]
-    let (wgrads, _bgrads) = nn.backwards(vals, loss_grad, &None);
+    let (wgrads, _bgrads) = nn.backwards(vals, loss_grad);
 
     // For input [1,0,0], expected weight gradient matrix shape (3 x 3):
     // first row should be (a - t), other rows zero
@@ -430,7 +452,7 @@ fn test_loss_and_backprop_binary_crossentropy() {
     let target = arr2(&[[1.0]]); // (1 x 1)
 
     // forward: z = 0 -> sigmoid(z) = 0.5
-    let vals = nn.internal_forward(&input, &None);
+    let vals = nn.internal_forward(&input, false);
     let outputs = vals.activated.last().unwrap().clone();
     assert!((outputs[[0, 0]] - 0.5).abs() < 1e-6);
 
@@ -441,7 +463,7 @@ fn test_loss_and_backprop_binary_crossentropy() {
 
     // gradients: output_loss = a - t = -0.5
     let loss_grad = nn.loss.gradient(&outputs, &target);
-    let (wgrads, _bgrads) = nn.backwards(vals, loss_grad, &None);
+    let (wgrads, _bgrads) = nn.backwards(vals, loss_grad);
 
     // expected weight gradient = input^T * (a - t) => [[-0.5], [-1.0]]
     let expected = arr2(&[[-0.5], [-1.0]]);
@@ -460,15 +482,15 @@ fn compare_mse_vs_bce_xor() {
         // MSE run
         let mut nn_mse = NN::new(&[2, hidden, 1])
             .with_learning_rate(0.25)
-            .with_hidden_type(ActivationType::Sigmoid)
-            .with_output_type(ActivationType::Sigmoid)
+            .with_activation_hidden(Activation::Sigmoid)
+            .with_activation_output(Activation::Sigmoid)
             .with_loss(Loss::MSE);
 
         // BCE run
         fastrand::seed(seed); // same init for fair comparison
         let mut nn_bce = NN::new(&[2, hidden, 1])
             .with_learning_rate(0.25)
-            .with_hidden_type(ActivationType::Sigmoid)
+            .with_activation_hidden(Activation::Sigmoid)
             .with_loss(Loss::BinaryCrossEntropy);
 
         let mut inp_out = [
@@ -529,7 +551,7 @@ fn test_label_smoothing_scales_gradients() {
     nn.set_weights(&zeros);
 
     let input = arr2(&[[1.0f32]]);
-    let vals = nn.internal_forward(&input, &None);
+    let vals = nn.internal_forward(&input, false);
     let outputs = vals.activated.last().unwrap().clone();
 
     let mut target_vec = vec![0f32; k];
@@ -545,8 +567,8 @@ fn test_label_smoothing_scales_gradients() {
     let grad_smooth = nn.loss.gradient(&outputs, &smoothed);
 
     // compute weight gradients via backwards
-    let (wgrads_no, _b_no) = nn.backwards(vals.clone(), grad_no, &None);
-    let (wgrads_s, _b_s) = nn.backwards(vals, grad_smooth, &None);
+    let (wgrads_no, _b_no) = nn.backwards(vals.clone(), grad_no);
+    let (wgrads_s, _b_s) = nn.backwards(vals, grad_smooth);
 
     let expected_factor = 1.0 - rate;
 
@@ -584,17 +606,15 @@ fn test_label_smoothing_changes_training_update() {
 fn test_dropout_masks() {
     fastrand::seed(2);
 
-    let nn = NN::new(&[2, 20, 3]);
     let dropout_rate = 0.2;
-    let masks_opt = dropout(Some(dropout_rate), &nn.shape());
-    assert!(masks_opt.is_some());
-    let masks = masks_opt.unwrap();
+    let mut nn = NN::new_input(2)
+        .layer(dense(20).dropout(dropout_rate))
+        .layer(3);
+    nn.update_dropout();
+    let mask_opt = nn.layers[0].dropout.as_ref().map(|a| a.mask());
+    assert!(mask_opt.is_some());
+    let first_mask = mask_opt.unwrap();
 
-    // there should be only mask on hidden layer
-    assert_eq!(masks.len(), nn.shape().len() - 2);
-
-    // intermediate (first) mask values must be only 0.0 or scaled
-    let first_mask = &masks[0];
     for &v in first_mask.iter() {
         assert!(v == 0.0f32 || v == 1.0f32 / (1.0 - dropout_rate));
     }
@@ -602,33 +622,34 @@ fn test_dropout_masks() {
     // we expect at least one 0 and one scaled
     let zero_count = first_mask.iter().filter(|&&x| x == 0.0f32).count();
     let non_zero_count = first_mask.iter().filter(|&&x| x != 0.0f32).count();
-    println!("masks: {:?}", masks);
+    println!("masks: {:?}", first_mask);
     assert!(zero_count > 0);
     assert!(non_zero_count > 0);
-
-    // ensure None returns None
-    assert!(dropout(None, &nn.shape()).is_none());
+    //last layer  has no dropout:
+    assert_eq!(nn.layers[1].dropout, None)
 }
 #[test]
 fn test_dropout_forward_and_backward_masking() {
     fastrand::seed(2);
 
-    let mut nn = NN::new(&[2, 4, 1]).with_loss(Loss::MSE);
     let dropout_rate = 0.5f32;
-    let masks = dropout(Some(dropout_rate), &nn.shape()).expect("should produce masks");
-
+    let mut nn = NN::new_input(2)
+        .layer(dense(4).dropout(dropout_rate))
+        .layer(1);
+    nn.update_dropout();
     // set all weights to 1.0 so pre-activation is deterministic (z = sum(inputs*1))
-    let total_w: usize = nn.weights.iter().map(|w| w.len()).sum();
+    let total_w: usize = nn.layers.iter().map(|w| w.weights.len()).sum();
     nn.set_weights(&vec![1.0f32; total_w]);
 
     // single example with inputs [1, 1] -> z_hidden = 1*1 + 1*1 = 2.0 for each hidden unit
     let input = arr2(&[[1.0f32, 1.0f32]]);
 
-    let vals = nn.internal_forward(&input, &Some(masks.clone()));
+    let vals = nn.internal_forward(&input, true);
     let hidden_activ = vals.activated.get(1).expect("hidden layer exists");
-    let mask_vec = &masks[0];
-    println!("hidden activations: {:?}", hidden_activ);
+    let mask_vec = &nn.layers[0].dropout.as_ref().map(|a| a.mask()).unwrap();
     println!("mask: {:?}", mask_vec);
+    println!("activations: {:?}", vals.activated);
+    println!("hidden: {:?}", hidden_activ);
 
     // compute expected unmasked activation for sigmoid(2.0)
     let z = 2.0f32;
@@ -657,7 +678,7 @@ fn test_dropout_forward_and_backward_masking() {
     let loss_grad = nn.loss.gradient(&outputs, &targets);
     println!("loss grad: {:?}", loss_grad);
 
-    let (wgrads, bgrads) = nn.backwards(vals.clone(), loss_grad, &Some(masks.clone()));
+    let (wgrads, bgrads) = nn.backwards(vals.clone(), loss_grad);
     println!("weight grads: {:?}", wgrads);
 
     // First layer gradients correspond to input->hidden (shape: inputs x hidden)
