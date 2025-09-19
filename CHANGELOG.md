@@ -1,3 +1,16 @@
+### 0.9.0
+- add per-layer activation, initialization, regularization, dropout
+- add builder starting with NN::new_input(usize)
+- rename some enums and methods
+
+### 0.8.0
+- add dropout
+- fix report classification for binary crossentropy
+- use BCE for moons example
+- move gradient calc into Loss; allow deserialization from different case; tidy
+- change Adam epsilon
+- show digit in terminal for MNIST 
+
 ### 0.7.0
 - change `run_and_report` to `train`, and add to `NN`
 - add `report` to `NN`
