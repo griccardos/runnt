@@ -1,6 +1,7 @@
 ### 0.9.0
 - add per-layer activation, initialization, regularization, dropout
 - add builder starting with NN::new_input(usize)
+- add learning rate scheduling
 - rename some enums and methods
 
 ### 0.8.0
