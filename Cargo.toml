@@ -6,7 +6,7 @@ license = "MIT"
 description = "Easy Neural Network for machine learning"
 repository = "https://github.com/griccardos/runnt/"
 readme = "README.md"
-keywords = ["reinforcement", "ai", "qlearning", "machinelearning", "learning"]
+keywords = ["ai", "neuralnetwork", "machinelearning", "artificialintelligence"]
 categories = ["science", "algorithms"]
 
 [dependencies]
@@ -14,10 +14,10 @@ fastrand = "2.3" #for random
 ndarray = "0.16" #for matrix
 
 [dev-dependencies]
-criterion = "0"    #for bench
-tempfile = "3"     #for test
-ratatui = "0.20"   #for moons tui example
-crossterm = "0.27" #for moons tui example
+criterion = "0.7.0"  #for bench
+tempfile = "3.22.0"  #for test
+ratatui = "0.29.0"   #for moons tui example
+crossterm = "0.29.0" #for moons tui example
 
 [[bench]]
 name = "iterations"

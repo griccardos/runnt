@@ -706,3 +706,61 @@ fn test_dropout_forward_and_backward_masking() {
         }
     }
 }
+
+#[test]
+fn test_fit_and_fit_parallel_must_be_equal() {
+    let n = 8;
+    let inputs_v: Vec<Vec<f32>> = (0..n)
+        .map(|i| vec![(i & 1) as f32, ((i >> 1) & 1) as f32, ((i >> 2) & 1) as f32])
+        .collect();
+    let targets_v: Vec<Vec<f32>> = (0..n)
+        .map(|i| {
+            if i % 2 == 0 {
+                vec![1.0f32, 0.0f32]
+            } else {
+                vec![0.0f32, 1.0f32]
+            }
+        })
+        .collect();
+
+    let inp_refs: Vec<&Vec<f32>> = inputs_v.iter().collect();
+    let tar_refs: Vec<&Vec<f32>> = targets_v.iter().collect();
+
+    // create two networks with identical initial weights
+    fastrand::seed(1);
+    let mut nn_a = NN::new(&[3, 6, 2]).with_learning_rate(0.05);
+
+    let w_init = nn_a.get_weights();
+    let b_init = nn_a.get_biases();
+
+    let mut nn_b = NN::new(&[3, 6, 2]).with_learning_rate(0.05);
+    nn_b.set_weights(&w_init);
+    nn_b.set_biases(&b_init);
+    nn_a.set_weights(&w_init);
+    nn_a.set_biases(&b_init);
+
+    let batch_size = inp_refs.len() / 4;
+    let thread_count = 4usize;
+
+    for _ in 0..20 {
+        nn_a.fit(&inp_refs, &tar_refs, batch_size);
+        nn_b.fit_parallel(&inp_refs, &tar_refs, batch_size, thread_count);
+    }
+
+    fn approx_eq_vec(a: &[f32], b: &[f32], eps: f32) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+        a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() <= eps)
+    }
+
+    let eps = 1e-5f32;
+    assert!(
+        approx_eq_vec(&nn_a.get_weights(), &nn_b.get_weights(), eps),
+        "weights differ by more than {eps}"
+    );
+    assert!(
+        approx_eq_vec(&nn_a.get_biases(), &nn_b.get_biases(), eps),
+        "biases differ by more than {eps}"
+    );
+}

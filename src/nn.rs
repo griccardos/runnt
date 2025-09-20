@@ -146,18 +146,18 @@ impl NN {
         shape
     }
 
-    ///Also known as Stochastic Gradient Descent i.e. Gradient descent with batch size = 1
+    ///Fits one example
     pub fn fit_one(&mut self, input: &[f32], targets: &[f32]) {
         self.fit_batch(&[&input.to_vec()], &[&targets.to_vec()]);
     }
 
-    /// Perform multiple mini batch gradient descents on `batch_size`.  
+    /// Perform multiple mini batch gradient descents on `batch_size` to complete 1 epoch  
     ///
-    /// If `batch_size` is smaller than data, will perform fit multiple times
+    /// If `batch_size` is smaller than data, will perform fit multiple times for 1 epoch
     ///
     /// If `batch_size` == number of examples, will do one gradient descent. (same as `fit_batch`)
     ///
-    /// If `batch_size` == 1, will perform gradient descent for each example. (same as `fit_one`)
+    /// If `batch_size` == 1, will perform gradient descent for each example. (same as `fit_one` for each example)
     ///
     /// For example if data has 100 examples and batch size is 20, it will adjust gradients 5 times
     pub fn fit(&mut self, inputs: &[&Vec<f32>], targets: &[&Vec<f32>], batch_size: usize) {
@@ -166,6 +166,71 @@ impl NN {
             .chunks(batch_size)
             .zip(targets.chunks(batch_size))
             .for_each(|(inps, outs)| self.fit_batch(inps, outs));
+    }
+
+    /// Parallel version of `fit`
+    ///
+    /// Break up the batches into chunks, and process in parallel.
+    /// Since we are not using BLAS, this should speed up processing.
+    ///
+    pub fn fit_parallel(
+        &mut self,
+        inputs: &[&Vec<f32>],
+        targets: &[&Vec<f32>],
+        batch_size: usize,
+        thread_count: usize,
+    ) {
+        assert!(thread_count >= 1, "Thread count must be at least 1");
+        if thread_count == 1 {
+            self.fit(inputs, targets, batch_size);
+            return;
+        }
+
+        inputs
+            .chunks(batch_size)
+            .zip(targets.chunks(batch_size))
+            .for_each(|(inps, outs)| {
+                let chunk_size = batch_size / thread_count + 1; //+1 for rounding
+                let actual_batch_size = inps.len();
+                self.update_dropout();
+                self.learning_rate.step();
+                let (mut avg_weight_gradient, avg_bias_gradient) = std::thread::scope(|s| {
+                    let mut handles = Vec::new();
+
+                    for (inps, outs) in inps.chunks(chunk_size).zip(outs.chunks(chunk_size)) {
+                        handles.push(s.spawn(|| {
+                            let inputs = to_matrix(inps);
+                            let targets = to_matrix(outs);
+
+                            self.calculate_gradient_sums(inputs, targets)
+                        }));
+                    }
+
+                    let mut total_weight_gradient: Vec<Array2<f32>> = vec![];
+                    let mut total_bias_gradient: Vec<Array2<f32>> = vec![];
+
+                    for h in handles {
+                        let (weight_gradient, bias_gradient) = h.join().unwrap();
+                        if total_weight_gradient.is_empty() {
+                            total_weight_gradient = weight_gradient;
+                            total_bias_gradient = bias_gradient;
+                        } else {
+                            for l in 0..total_weight_gradient.len() {
+                                total_weight_gradient[l] += &weight_gradient[l];
+                                total_bias_gradient[l] += &bias_gradient[l];
+                            }
+                        }
+                    }
+                    average_gradients(
+                        &mut total_weight_gradient,
+                        &mut total_bias_gradient,
+                        actual_batch_size,
+                    );
+                    (total_weight_gradient, total_bias_gradient)
+                });
+                self.regularize(&mut avg_weight_gradient);
+                self.apply_gradients(avg_weight_gradient, avg_bias_gradient);
+            });
     }
 
     /// Gradient descent on entire batch <br>
@@ -184,24 +249,34 @@ impl NN {
             "Target size does not match network output size"
         );
 
-        //smoothing labels if set
-        let new_targets = match self.label_smoothing {
-            Some(rate) => smooth_labels(targets, rate),
-            None => targets.iter().map(|a| a.to_vec()).collect(),
-        };
-        let targets = &new_targets.iter().map(|a| a).collect::<Vec<&Vec<f32>>>();
-
         let inputs_matrix = to_matrix(inputs);
         let targets_matrix = to_matrix(targets);
         self.update_dropout();
         self.learning_rate.step();
-        let values = self.internal_forward(&inputs_matrix, true);
-        let outputs = values.activated.last().expect("There should be outputs");
+        let (mut weight_gradient, mut bias_gradient) =
+            self.calculate_gradient_sums(inputs_matrix, targets_matrix);
+        average_gradients(&mut weight_gradient, &mut bias_gradient, inputs.len());
 
-        let loss = self.loss.gradient(outputs, &targets_matrix);
-        let (mut weight_gradient, bias_gradient) = self.backwards(values, loss);
         self.regularize(&mut weight_gradient);
         self.apply_gradients(weight_gradient, bias_gradient);
+    }
+    ///NOTE: this is the sum of the gradients
+    fn calculate_gradient_sums(
+        &self,
+        inputs: Array2<f32>,
+        mut targets: Array2<f32>,
+    ) -> (Vec<Array2<f32>>, Vec<Array2<f32>>) {
+        //smoothing labels if set
+        let shape = targets.shape()[1] as f32;
+        if let Some(rate) = self.label_smoothing {
+            targets.mapv_inplace(|x| x * (1. - rate) + rate / (shape))
+        }
+
+        let values = self.internal_forward(&inputs, true);
+        let outputs = values.activated.last().expect("There should be outputs");
+
+        let loss = self.loss.gradient(outputs, &targets);
+        self.backwards(values, loss)
     }
 
     fn update_dropout(&mut self) {
@@ -346,7 +421,7 @@ impl NN {
                     Loss::SoftmaxAndCrossEntropy => {
                         //avoid overflow by subtracting the max from each row
                         for mut r in act_sum.rows_mut() {
-                            let max = r.iter().cloned().fold(f32::NEG_INFINITY, f32::max); //find max
+                            let max = r.iter().fold(f32::NEG_INFINITY, |acc, &x| acc.max(x)); //find max
                             r.mapv_inplace(|a| a - max);
                         }
                         act_sum.mapv_inplace(f32::exp); //calc e^val
@@ -383,6 +458,7 @@ impl NN {
 
     /// Calculates the gradients for all layers.
     /// Returns the weight and bias gradients for each layer
+    /// NOTE: this is the sum of the gradients for each example in the batch
     fn backwards(
         &self,
         values_and_activations: ValueAndActivated,
@@ -409,7 +485,6 @@ impl NN {
 
         let mut weight_gradients = vec![];
         let mut bias_gradients = vec![];
-        let example_count = output_gradient.shape()[0];
 
         let mut next_layer_error_deriv = output_gradient; //output error gradient dE/dA
 
@@ -461,14 +536,6 @@ impl NN {
 
             weight_gradients.insert(0, error_grad_weights);
             bias_gradients.insert(0, error_grad_bias.to_owned());
-        }
-
-        //we have sum, now get average of error gradient
-        for layer in &mut weight_gradients {
-            layer.mapv_inplace(|a| a / example_count as f32);
-        }
-        for layer in &mut bias_gradients {
-            layer.mapv_inplace(|a| a / example_count as f32);
         }
 
         (weight_gradients, bias_gradients)
@@ -796,16 +863,20 @@ impl NN {
     }
 }
 
-fn smooth_labels(targets: &[&Vec<f32>], rate: f32) -> Vec<Vec<f32>> {
-    targets
-        .iter()
-        .map(|a| {
-            a.iter()
-                .map(|v| v * (1. - rate) + rate / (targets[0].len() as f32))
-                .collect()
-        })
-        .collect::<Vec<Vec<f32>>>()
+fn average_gradients(
+    weight_gradients: &mut Vec<ArrayBase<ndarray::OwnedRepr<f32>, Dim<[usize; 2]>>>,
+    bias_gradients: &mut Vec<ArrayBase<ndarray::OwnedRepr<f32>, Dim<[usize; 2]>>>,
+    count: usize,
+) {
+    //we have sum, now get average of error gradient
+    for layer in weight_gradients {
+        layer.mapv_inplace(|a| a / count as f32);
+    }
+    for layer in bias_gradients {
+        layer.mapv_inplace(|a| a / count as f32);
+    }
 }
+
 impl Sede for NN {
     fn serialize(&self) -> String {
         let mut vec = vec![];
@@ -923,7 +994,9 @@ pub fn max_index(vec: &[f32]) -> usize {
 }
 
 /// convert this into Matrix
+///
 /// Each column is an input into the neural network
+///
 /// Each row is an example
 fn to_matrix(vec: &[&Vec<f32>]) -> Array2<f32> {
     assert!(!vec.is_empty(), "Input vec is empty");

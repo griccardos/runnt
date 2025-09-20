@@ -83,7 +83,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     loop {
         terminal.draw(|f| {
-            let size = f.size();
+            let size = f.area();
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(3), Constraint::Min(10)].as_ref())
@@ -138,19 +138,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let chart = Chart::new(datasets)
                 .block(Block::default().borders(Borders::ALL).title("Scatter"))
-                .x_axis(Axis::default().bounds([-1.5, 3.5]).labels(vec![
-                    "-1.5".into(),
-                    "0".into(),
-                    "1.0".into(),
-                    "2.5".into(),
-                ]))
-                .y_axis(Axis::default().bounds([-2.0, 2.0]).labels(vec![
-                    "-2.0".into(),
-                    "-1.0".into(),
-                    "0".into(),
-                    "1.0".into(),
-                    "2.0".into(),
-                ]));
+                .x_axis(Axis::default().bounds([-1.5, 3.5]))
+                .y_axis(Axis::default().bounds([-2.0, 2.0]));
             f.render_widget(chart, chunks[1]);
         })?;
 

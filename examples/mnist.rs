@@ -1,6 +1,10 @@
 use std::{
     io::{BufReader, Read},
     path::{Path, PathBuf},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU32, Ordering},
+    },
     time::Instant,
 };
 
@@ -11,6 +15,7 @@ use runnt::{
     loss::Loss,
     nn::{NN, max_index, max_index_equal},
     optimizer::Optimizer,
+    prelude::Regularization,
 };
 
 //Classification example
@@ -36,13 +41,14 @@ cargo run --release --example mnist -- /tmp/mnist
         .with_loss(Loss::SoftmaxAndCrossEntropy)
         .with_initialization(Initialization::He)
         .with_optimizer(Optimizer::adam())
+        .with_regularization(Regularization::l2())
         .with_dropout(0.2)
         .with_learning_rate(LearningRate::new(Rate::Cosine {
-            start_rate: 0.001,
-            warmup_target_rate: 0.002,
-            warmup_steps: 3000,
-            total_steps: 10000,
-            min_rate: 0.0005,
+            start_rate: 0.002,
+            warmup_target_rate: 0.005,
+            warmup_steps: 300,
+            total_steps: 1700,
+            min_rate: 0.001,
         }));
 
     let path = &args[1];
@@ -52,12 +58,13 @@ cargo run --release --example mnist -- /tmp/mnist
 
     let start = Instant::now();
 
-    for epoch in 1..=20 {
+    for epoch in 1..=30 {
         fastrand::shuffle(&mut training);
 
         let inputs = training.iter().map(|x| &x.0).collect::<Vec<_>>();
         let targets = training.iter().map(|x| &x.1).collect::<Vec<_>>();
-        nn.fit(&inputs, &targets, 100);
+        nn.fit_parallel(&inputs, &targets, 1024, 8);
+        // nn.fit(&inputs, &targets, 1024);
         let (test_acc, test_mse) = get_acc_mse(&nn, &test);
         let (train_acc, train_mse) = get_acc_mse(&nn, &training);
         println!(
@@ -72,24 +79,33 @@ cargo run --release --example mnist -- /tmp/mnist
     }
     println!("nn: {}", nn);
 
-    // Interactive scroll through test examples
     scroll_through_examples(&nn, &test);
 }
 
 fn get_acc_mse(nn: &NN, data: &[(Vec<f32>, Vec<f32>)]) -> (f32, f32) {
-    let mut sum = 0;
-    let mut sse = 0.;
-    for dat in data {
-        let pred = nn.forward(dat.0.as_slice());
+    let sum = AtomicU32::new(0);
+    let sse = Arc::new(Mutex::new(0.));
+    let procs = std::thread::available_parallelism().map_or(4, |n| n.get());
+    std::thread::scope(|s| {
+        data.chunks(data.len() / procs + 1).for_each(|chunk| {
+            let sse = Arc::clone(&sse);
+            let sum = &sum;
 
-        if max_index_equal(&pred, &dat.1) {
-            sum += 1
-        }
-        sse += nn.calc_error(&pred, &dat.1);
-    }
+            s.spawn(move || {
+                for dat in chunk {
+                    let pred = nn.forward(dat.0.as_slice());
 
-    let mse = sse / (data.len() as f32);
-    let mean_acc = (sum as f32) / (data.len() as f32);
+                    if max_index_equal(&pred, &dat.1) {
+                        sum.fetch_add(1, Ordering::Relaxed);
+                    }
+                    *sse.lock().unwrap() += nn.calc_error(&pred, &dat.1);
+                }
+            });
+        });
+    });
+
+    let mse = *sse.lock().unwrap() / (data.len() as f32);
+    let mean_acc = (sum.load(Ordering::Relaxed) as f32) / (data.len() as f32);
     (mean_acc, mse)
 }
 struct TrainTest {

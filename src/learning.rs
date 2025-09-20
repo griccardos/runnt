@@ -73,6 +73,7 @@ pub enum Rate {
         start_rate: f32,
         warmup_target_rate: f32,
         warmup_steps: usize,
+        ///this is the total number of steps (1 step is a batch update)
         total_steps: usize,
         min_rate: f32,
     },
