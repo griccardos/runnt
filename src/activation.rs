@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::{error::Error, sede::Sede};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -36,6 +38,12 @@ pub fn activate_der(value: f32, activated_value: f32, ltype: Activation) -> f32 
             let sigmoid = 1. / (1. + (-value).exp());
             sigmoid + value * sigmoid * (1. - sigmoid)
         }
+    }
+}
+
+impl Display for Activation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.serialize())
     }
 }
 

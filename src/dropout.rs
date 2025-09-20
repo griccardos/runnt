@@ -19,6 +19,9 @@ impl Dropout {
             values,
         }
     }
+    pub(crate) fn rate(&self) -> f32 {
+        self.rate
+    }
     pub(crate) fn recalc(&mut self) {
         self.values.mapv_inplace(|_|
                 //keep with prob 1-dropout
@@ -52,13 +55,15 @@ impl Sede for Option<Dropout> {
         if let Some((rate_str, size_str)) = s.split_once(':') {
             let rate: f32 = rate_str
                 .parse()
-                .map_err(|_| Error::ParseError("Invalid dropout rate".to_string()))?;
+                .map_err(|_| Error::SerializationError("Invalid dropout rate".to_string()))?;
             let size: usize = size_str
                 .parse()
-                .map_err(|_| Error::ParseError("Invalid dropout size".to_string()))?;
+                .map_err(|_| Error::SerializationError("Invalid dropout size".to_string()))?;
             Ok(Some(Dropout::new(rate, size)))
         } else {
-            Err(Error::ParseError("Invalid dropout format".to_string()))
+            Err(Error::SerializationError(
+                "Invalid dropout format".to_string(),
+            ))
         }
     }
 }

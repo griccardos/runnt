@@ -5,9 +5,11 @@ use std::time::Instant;
 
 use crate::activation::{Activation, activate, activate_der};
 use crate::dataset::Dataset;
+use crate::dropout::Dropout;
 use crate::error::Error;
 use crate::initialization::Initialization;
 use crate::layer::{Dense, DenseBuilder};
+use crate::learning::{LearningRate, Rate};
 use crate::loss::Loss;
 use crate::optimizer::{Optimizer, OptimizerInternal};
 use crate::regularization::Regularization;
@@ -37,7 +39,7 @@ use crate::sede::Sede;
 ///```
 pub struct NN {
     pub(crate) layers: Vec<Dense>,
-    pub(crate) learning_rate: f32,
+    pub(crate) learning_rate: LearningRate,
     pub(crate) loss: Loss,
     pub(crate) optimizer: OptimizerInternal,
     pub(crate) label_smoothing: Option<f32>,
@@ -76,7 +78,7 @@ impl NN {
     pub fn new_input(input: usize) -> NN {
         NN {
             layers: vec![],
-            learning_rate: 0.01,
+            learning_rate: 0.01.into(),
             loss: Loss::MSE,
             optimizer: Optimizer::sgd().into(),
             label_smoothing: None,
@@ -95,8 +97,12 @@ impl NN {
         self
     }
 
-    pub fn with_learning_rate(mut self, rate: f32) -> NN {
-        self.learning_rate = rate;
+    /// The learning rate to use for training.
+    ///
+    /// For constant: `.with_learning_rate(0.01)`<br/>
+    /// For cosine decay with warmup: `.with_learning_rate(Rate::Cosine { start_rate: 0.0, warmup_target_rate: 0.1, warmup_steps: 100, total_steps: 10000, min_rate: 0.001 })`
+    pub fn with_learning_rate(mut self, rate: impl Into<LearningRate>) -> NN {
+        self.learning_rate = rate.into();
         self
     }
     pub fn with_optimizer(mut self, optimizer: Optimizer) -> NN {
@@ -188,6 +194,7 @@ impl NN {
         let inputs_matrix = to_matrix(inputs);
         let targets_matrix = to_matrix(targets);
         self.update_dropout();
+        self.learning_rate.step();
         let values = self.internal_forward(&inputs_matrix, true);
         let outputs = values.activated.last().expect("There should be outputs");
 
@@ -503,7 +510,7 @@ impl NN {
         let (dw, db) = self.optimizer.calc_gradient_update(
             weight_gradients,
             bias_gradients,
-            self.learning_rate,
+            self.learning_rate.get(),
         );
 
         let layers = self.shape().len();
@@ -742,7 +749,7 @@ impl NN {
         }
         acc_string
     }
-
+    /// Overrides initialization on each hidden layer, and reinitializes weights
     pub fn with_initialization(mut self, initialization: Initialization) -> Self {
         for layer in &mut self.layers {
             layer.initialization = initialization;
@@ -750,29 +757,42 @@ impl NN {
         }
         self
     }
+    /// Overrides regularization on each hidden layer.
     pub fn with_regularization(mut self, reg: Regularization) -> Self {
         for layer in &mut self.layers {
             layer.regularization = reg.clone();
         }
         self
     }
-
+    /// Overrides dropout on each hidden layer.
+    pub fn with_dropout(mut self, rate: f32) -> NN {
+        for lay in &mut self.layers {
+            lay.dropout = Some(Dropout::new(rate, lay.weights.shape()[1]));
+        }
+        self
+    }
+    /// Overrides activation on each hidden layer.
     pub fn with_activation_hidden(mut self, atype: Activation) -> Self {
         for l in 0..self.layers.len() - 1 {
             self.layers[l].activation = atype;
         }
         self
     }
+    /// Overrides activation on output layer.
     pub fn with_activation_output(mut self, atype: Activation) -> Self {
         let last = self.layers.len() - 1;
         self.layers[last].activation = atype;
         self
     }
-
+    /// Reinitializes weights on all layers
     pub fn reset_weights(&mut self) {
         for l in self.layers.iter_mut() {
             l.reinitialize();
         }
+    }
+
+    pub fn learning_rate(&self) -> f32 {
+        self.learning_rate.get()
     }
 }
 
@@ -789,7 +809,7 @@ fn smooth_labels(targets: &[&Vec<f32>], rate: f32) -> Vec<Vec<f32>> {
 impl Sede for NN {
     fn serialize(&self) -> String {
         let mut vec = vec![];
-        vec.push(format!("learning_rate={}", self.learning_rate));
+        vec.push(format!("learning_rate={}", self.learning_rate.serialize()));
         vec.push(format!("loss={}", self.loss.serialize()));
         vec.push(format!("optimizer={}", self.optimizer.serialize()));
         for l in &self.layers {
@@ -814,14 +834,14 @@ impl Sede for NN {
             })
             .collect::<Vec<Vec<String>>>();
 
-        let mut learning_rate = 0.01f32;
+        let mut learning_rate = LearningRate::new(Rate::Constant(0.01));
         let mut loss = Loss::MSE;
         let mut label_smoothing = None;
         let mut optimizer = Optimizer::sgd().into();
         let mut layers: Vec<Dense> = vec![];
         for line in data {
             if line[0] == "learning_rate" {
-                learning_rate = line[1].parse::<f32>()?;
+                learning_rate = LearningRate::deserialize(&line[1])?;
             } else if line[0] == "label_smoothing" {
                 label_smoothing = match line[1].as_str() {
                     "None" => None,

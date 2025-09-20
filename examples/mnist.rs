@@ -7,10 +7,10 @@ use std::{
 use runnt::{
     activation::Activation,
     initialization::Initialization,
+    learning::{LearningRate, Rate},
     loss::Loss,
     nn::{NN, max_index, max_index_equal},
     optimizer::Optimizer,
-    regularization::Regularization,
 };
 
 //Classification example
@@ -32,12 +32,18 @@ cargo run --release --example mnist -- /tmp/mnist
     }
 
     let mut nn = NN::new(&[784, 128, 10])
-        .with_activation_hidden(Activation::Swish)
+        .with_activation_hidden(Activation::Relu)
         .with_loss(Loss::SoftmaxAndCrossEntropy)
         .with_initialization(Initialization::He)
-        .with_regularization(Regularization::L2(0.0001))
         .with_optimizer(Optimizer::adam())
-        .with_learning_rate(0.001);
+        .with_dropout(0.2)
+        .with_learning_rate(LearningRate::new(Rate::Cosine {
+            start_rate: 0.001,
+            warmup_target_rate: 0.002,
+            warmup_steps: 3000,
+            total_steps: 10000,
+            min_rate: 0.0005,
+        }));
 
     let path = &args[1];
     let tt = get_train_test(path);
@@ -46,23 +52,26 @@ cargo run --release --example mnist -- /tmp/mnist
 
     let start = Instant::now();
 
-    for epoch in 1..5 {
+    for epoch in 1..=20 {
         fastrand::shuffle(&mut training);
 
         let inputs = training.iter().map(|x| &x.0).collect::<Vec<_>>();
         let targets = training.iter().map(|x| &x.1).collect::<Vec<_>>();
-        nn.fit(&inputs, &targets, 10);
+        nn.fit(&inputs, &targets, 100);
         let (test_acc, test_mse) = get_acc_mse(&nn, &test);
         let (train_acc, train_mse) = get_acc_mse(&nn, &training);
         println!(
-            "epoch {epoch} train mse:{} test mse:{} train acc:{}% test acc:{}% in {:.2}s",
+            "epoch {epoch} train mse:{} test mse:{} train acc:{}% test acc:{}% in {:.2}s rate:{}",
             train_mse,
             test_mse,
             train_acc * 100.,
             test_acc * 100.,
-            start.elapsed().as_secs_f32()
+            start.elapsed().as_secs_f32(),
+            nn.learning_rate(),
         );
     }
+    println!("nn: {}", nn);
+
     // Interactive scroll through test examples
     scroll_through_examples(&nn, &test);
 }

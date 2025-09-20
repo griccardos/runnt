@@ -53,11 +53,14 @@ impl Display for Dense {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Weights:{}x{} Bias:{} Initialization:{}",
+            "Weights:{}x{} Bias:{} Initialization:{} Dropout:{} Activation:{} Regularization:{}",
             self.weights.shape()[0],
             self.weights.shape()[1],
             self.bias.shape()[1],
             self.initialization,
+            self.dropout.as_ref().map(|d| d.rate()).unwrap_or(0.0),
+            self.activation,
+            self.regularization
         )
     }
 }
