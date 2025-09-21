@@ -2,6 +2,7 @@
 - add per-layer activation, initialization, regularization, dropout
 - add builder starting with NN::new_input(usize)
 - add learning rate scheduling
+- add `fit_parallel` to use multiple threads for training
 - rename some enums and methods
 
 ### 0.8.0
